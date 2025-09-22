@@ -98,5 +98,5 @@ gdb-multiarch kernel-qemu.elf
   - 对应代码![1758542435022](image/doc/1758542435022.png)
 - print去掉锁
 
-  - 结果图![1758542950193](image/doc/1758542950193.png)
-  - 对应代码![1758542988190](image/doc/1758542988190.png)
+  - 结果图![1758544509370](image/doc/1758544509370.png)![1758544496923](image/doc/1758544496923.png)
+  - 对应修改：去掉start变量和print中使用了spin_lock的相关语句
