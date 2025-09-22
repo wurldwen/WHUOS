@@ -3,7 +3,6 @@
 
 volatile static int started = 0;
 
-int main()
-{
+int main() {
     while (1);    
 }

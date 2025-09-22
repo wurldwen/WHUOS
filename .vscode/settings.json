@@ -1,0 +1,7 @@
+{
+    "files.associations": {
+        "riscv.h": "c",
+        "print.h": "c",
+        "lock.h": "c"
+    }
+}
