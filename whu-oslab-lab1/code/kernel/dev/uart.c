@@ -40,9 +40,9 @@ void uart_init(void)
   // 进入设置比特率的模式
   WriteReg(LCR, LCR_BAUD_LATCH);
 
-  // 设置比特率的低位和高位，最终设置为38.4K
-  WriteReg(0, 0x03);
-  WriteReg(1, 0x00);
+  // 设置比特率的低位和高位，最终设置为115200 (QEMU virt 默认)
+  WriteReg(0, 13);
+  WriteReg(1, 0);
 
   // 设置传输字节长度为8bit,不校验
   WriteReg(LCR, LCR_EIGHT_BITS);

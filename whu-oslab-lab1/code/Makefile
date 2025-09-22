@@ -13,7 +13,7 @@ $(KERN):
 # QEMU相关配置
 QEMU     =  qemu-system-riscv64
 QEMUOPTS =  -machine virt -bios none -kernel $(KERNEL_ELF) 
-QEMUOPTS += -m 128M -smp $(CPUNUM) -nographic
+QEMUOPTS += -m 128M -smp $(CPUNUM) -nographic -serial mon:stdio
 
 # 调试
 GDBPORT = $(shell expr `id -u` % 5000 + 25000)

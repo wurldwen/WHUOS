@@ -16,6 +16,7 @@ static char digits[] = "0123456789abcdef";
 // 初始化打印模块
 void print_init(void)
 {
+    uart_init();
     spinlock_init(&print_lk, "print");
 }
 
@@ -32,6 +33,9 @@ void printf(const char *fmt, ...)
     // 遍历格式字符串
     for (i = 0; (c = fmt[i] & 0xff) != 0; i++) {
         if (c != '%') {
+            if (c == '\n') {
+                uart_putc_sync('\r');
+            }
             uart_putc_sync(c);  // 输出普通字符
             continue;
         }

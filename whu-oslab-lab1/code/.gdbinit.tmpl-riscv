@@ -1,0 +1,7 @@
+set confirm off
+set auto-load safe-path /home/hwt/sources/lab/OSLab/WHUOS/whu-oslab-lab1/code/.gdbinit
+set architecture riscv:rv64
+target remote 127.0.0.1:1234
+symbol-file kernel-qemu
+set disassemble-next-line auto
+set riscv use-compressed-breakpoints yes
