@@ -4,6 +4,8 @@
 
 #include "mem/pmem.h"
 #include "lib/lock.h"
+#include "lib/str.h"
+#include "lib/print.h"
 #include "riscv.h"
 // 物理页节点
 typedef struct page_node {
@@ -82,7 +84,7 @@ init_region(alloc_region_t *r, uint64 b, uint64 e, const char *name)
 static void
 freerange_region(alloc_region_t *r, uint64 pa_start, uint64 pa_end)
 {
-  uint64 p = PGROUNDUP(pa_start);
+  uint64 p = PG_ROUND_UP(pa_start);
   for (; p + PGSIZE <= pa_end; p += PGSIZE)
     region_free_page(r, p);
 }
