@@ -34,7 +34,7 @@ int main()
 //         print_init();
 //         printf("cpu %d is booting!\n", cpuid);    
 //         __sync_synchronize();
-//         for(int i = 0; i < 900; i++) {
+//         for(int i = 0; i < 10000; i++) {
 //             /* 在临界区保护对全局 sum 的更新（注释版） */
 //             spinlock_acquire(&sum_lock);
 //             sum++;
@@ -47,7 +47,7 @@ int main()
 //         __sync_synchronize();
 //         printf("cpu %d is booting!\n", cpuid);
 //         //spinlock_acquire(&sum_lock);
-//         for(int i = 0; i < 900; i++) {
+//         for(int i = 0; i < 10000; i++) {
 //             spinlock_acquire(&sum_lock);
 //             sum++;
 //             spinlock_release(&sum_lock);
@@ -57,4 +57,4 @@ int main()
 //     }   
 //     while (1);    
 // }  
-
+//为什么放临界区可能没输出，死锁了吗
