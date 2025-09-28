@@ -3,6 +3,10 @@
         "riscv.h": "c",
         "print.h": "c",
         "lock.h": "c",
-        "uart.h": "c"
+        "uart.h": "c",
+        "types.h": "c",
+        "semaphore": "c",
+        "stop_token": "c",
+        "defs.h": "c"
     }
 }
