@@ -163,13 +163,9 @@ static inline void w_mtvec(uint64 x)
   asm volatile("csrw mtvec, %0" : : "r" (x));
 }
 
-// use riscv's sv39 page table scheme.
-#define SATP_SV39 (8L << 60)
-
-#define MAKE_SATP(pagetable) (SATP_SV39 | (((uint64)pagetable) >> 12))
-
 // supervisor address translation and protection;
-// holds the address of the page table.
+// holds the address of the page table. MAKE_SATP and SATP_SV39
+// are defined in include/mem/vmem.h to avoid duplication.
 static inline void w_satp(uint64 x)
 {
   asm volatile("csrw satp, %0" : : "r" (x));
@@ -298,33 +294,14 @@ w_pmpaddr0(uint64 x)
   asm volatile("csrw pmpaddr0, %0" : : "r" (x));
 }
 // 内存管理相关
+// NOTE: page-table specific types and macros (pte_t, pgtbl_t,
+// PA/ PTE conversions, PTE flags and VA-to-VPN macros) are
+// defined in include/mem/vmem.h to keep those definitions
+// colocated with the virtual memory implementation. Keep
+// PGSIZE and basic page helpers here.
 
 #define PGSIZE 4096 // bytes per page
 #define PGSHIFT 12  // bits of offset within a page
 
 #define PG_ROUND_UP(sz)  (((sz)+PGSIZE-1) & ~(PGSIZE-1))
 #define PG_ROUND_DOWN(a) (((a)) & ~(PGSIZE-1))
-
-#define PTE_V (1L << 0) // valid
-#define PTE_R (1L << 1)
-#define PTE_W (1L << 2)
-#define PTE_X (1L << 3)
-#define PTE_U (1L << 4) // 1 -> user can access
-
-// shift a physical address to the right place for a PTE.
-#define PA2PTE(pa) ((((uint64)pa) >> 12) << 10)
-
-#define PTE2PA(pte) (((pte) >> 10) << 12)
-
-#define PTE_FLAGS(pte) ((pte) & 0x3FF)
-
-// extract the three 9-bit page table indices from a virtual address.
-#define PXMASK          0x1FF // 9 bits
-#define PXSHIFT(level)  (PGSHIFT+(9*(level)))
-#define PX(level, va)   ((((uint64) (va)) >> PXSHIFT(level)) & PXMASK)
-
-// one beyond the highest possible virtual address.
-// MAXVA is actually one bit less than the max allowed by
-// Sv39, to avoid having to sign-extend virtual addresses
-// that have the high bit set.
-#define MAXVA (1L << (9 + 9 + 9 + 12 - 1))

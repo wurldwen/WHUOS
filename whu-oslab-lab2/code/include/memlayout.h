@@ -2,12 +2,17 @@
 #ifndef __MEMLAYOUT_H__
 #define __MEMLAYOUT_H__
 
+// 内核基地址
+#define KERNEL_BASE 0x80000000ul
+#define PHYSTOP (KERNEL_BASE + 128*1024*1024)
+
 // UART 相关
 #define UART_BASE  0x10000000ul
 #define UART_IRQ   10
 
-// 内核基地址
-#define KERNEL_BASE 0x80000000ul
+// UART
+#define VIRTIO0 0x10001000
+#define VIRTIO0_IRQ 1
 
 // platform-level interrupt controller(PLIC)
 #define PLIC_BASE 0x0c000000ul
@@ -25,5 +30,6 @@
 #define CLINT_MSIP(hartid) (CLINT_BASE + 4 * (hartid))
 #define CLINT_MTIMECMP(hartid) (CLINT_BASE + 0x4000 + 8 * (hartid))
 #define CLINT_MTIME (CLINT_BASE + 0xBFF8)
+
 
 #endif
