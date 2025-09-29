@@ -35,7 +35,7 @@ region_free_page(alloc_region_t *r, uint64 pa)
     panic("region_free_page: bad page\n");
 
   // 用垃圾数据填充页面，帮助捕捉悬空引用
-  memset((void*)pa, 1, PGSIZE);
+  //memset((void*)pa, 1, PGSIZE);
 
   // 将页加入链表头（临界区）
   spinlock_acquire(&r->lk);
@@ -63,8 +63,8 @@ region_alloc_page(alloc_region_t *r)
   spinlock_release(&r->lk);
 
   // 分配时用另一个模式填充页面，便于调试
-  if (pa)
-    memset((void*)pa, 5, PGSIZE);
+  //if (pa)
+    //memset((void*)pa, 5, PGSIZE);
   return pa;
 }
 
@@ -94,7 +94,7 @@ void
 pmem_init(void)
 {
   uint64 a = (uint64)ALLOC_BEGIN;
-  uint64 b = (uint64)ALLOC_END;
+  uint64 b = (uint64)0x88000000;
 
   if (a >= b)
     panic("pmem_init: bad ALLOC range\n");

@@ -32,7 +32,7 @@ void pop_off(void)
 bool spinlock_holding(spinlock_t *lk)
 {
   int r;
-  r = (lk->locked && lk->cpuid == mycpuid());
+  r = ((lk->locked == 1 )&& (lk->cpuid == mycpuid()));
   return r;
 }
 
@@ -48,9 +48,11 @@ void spinlock_init(spinlock_t *lk, char *name)
 void spinlock_acquire(spinlock_t *lk)
 {    
   push_off(); // 禁用中断以避免死锁。
-  if(spinlock_holding(lk))
+  if(spinlock_holding(lk)){
+    printf("%d %d %d %d,%d\n",mycpuid(),lk->locked,lk->cpuid,((lk->locked == 1 )&& (lk->cpuid == mycpuid())),spinlock_holding(lk));
+    printf("lk name: %s\n", lk->name);
     panic("acquire");
-
+  }
   // 在 RISC-V 上，sync_lock_test_and_set 转换为原子交换：
   //   a5 = 1
   //   s1 = &lk->locked

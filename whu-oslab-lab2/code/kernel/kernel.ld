@@ -41,11 +41,11 @@ SECTIONS
   PROVIDE(end = .);
 
   /* allocation area markers: 为实验预留一段物理页作为 ALLOC 区域
-   * ALLOC_BEGIN 在 end 向上对齐到页面后，ALLO C_END = ALLOC_BEGIN + 18*PGSIZE
+   * ALLOC_BEGIN 在 end 向上对齐到页面后，ALLO C_END = ALLOC_BEGIN + 1024*PGSIZE
    * 这样 pmem.c 能使用 ALLOC_BEGIN/ALLOC_END 来初始化内核/用户页池
    */
   . = ALIGN(0x1000);
   PROVIDE(ALLOC_BEGIN = .);
-  . = . + (18 * 4096);
+  . = . + (1024 * 4096);
   PROVIDE(ALLOC_END = .);
 }

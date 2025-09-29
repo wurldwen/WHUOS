@@ -11,6 +11,7 @@
         "fs.h": "c",
         "pmem.h": "c",
         "proc.h": "c",
-        "memlayout.h": "c"
+        "memlayout.h": "c",
+        "random": "c"
     }
 }

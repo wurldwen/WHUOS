@@ -14,7 +14,7 @@ void  pmem_free(uint64 page, bool in_kernel);
 
 // 内核占用的物理页数（可通过在编译时用 -DKERNEL_PAGES=N 覆盖）
 #ifndef KERNEL_PAGES
-#define KERNEL_PAGES 6
+#define KERNEL_PAGES 1024
 #endif
 
 #endif

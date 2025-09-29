@@ -7,8 +7,11 @@
 // 标记系统是否已进入恐慌状态，用于冻结其他 CPU 的 UART 输出
 volatile int panicked = 0;
 
-// 打印锁，用于保护打印操作的线程安全
-static spinlock_t print_lk;
+// 打印锁结构
+static struct {
+  spinlock_t lock;
+  int locking;
+} pr;
 
 // 数字字符数组，用于将数字转换为字符
 static char digits[] = "0123456789abcdef";
@@ -17,7 +20,8 @@ static char digits[] = "0123456789abcdef";
 void print_init(void)
 {
     uart_init();
-    spinlock_init(&print_lk, "print");
+    spinlock_init(&pr.lock, "print");
+    pr.locking = 1;
 }
 
 // 格式化打印函数，仅支持 %d, %x, %p, %s 格式
@@ -28,7 +32,9 @@ void printf(const char *fmt, ...)
     char *s;     // 字符串指针
 
     va_start(ap, fmt);  // 初始化可变参数
-    spinlock_acquire(&print_lk);  // 获取打印锁
+    int locking = pr.locking;
+    if (locking)
+        spinlock_acquire(&pr.lock);  // 获取打印锁
 
     // 遍历格式字符串
     for (i = 0; (c = fmt[i] & 0xff) != 0; i++) {
@@ -109,14 +115,15 @@ void printf(const char *fmt, ...)
         }
     }
 
-    spinlock_release(&print_lk);  // 释放打印锁
+    if (locking)
+        spinlock_release(&pr.lock);  // 释放打印锁
     va_end(ap);  // 结束可变参数
 }
 
 // 恐慌函数，输出错误信息并进入死循环
 void panic(const char *s)
 {
-    spinlock_acquire(&print_lk);
+    pr.locking = 0;
     printf("panic: ");
     printf(s);
     printf("\n");

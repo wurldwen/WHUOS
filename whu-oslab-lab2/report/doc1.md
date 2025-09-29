@@ -85,7 +85,7 @@
 
 ##### 页表管理设计决策
 
-- **SV39 分页模式**: RISC-V 标准，支持 39 位虚拟地址空间，适合教学和实验。
+- **SV39 分页模式**: RISC-V 标准，支持 39 位虚拟地址空间。
 - **权限位设置**: 区分读、写、执行、用户等权限，确保内存安全。
 - **恒等映射内核区域**: 简化内核访问物理内存的逻辑。
 - **设备 MMIO 映射**: 将设备地址映射到虚拟地址空间，便于内核访问。
@@ -95,17 +95,19 @@
 本实验旨在实现一个基于 RISC-V 架构的操作系统内核中的物理内存分配器和虚拟内存管理模块。实验过程分为以下几个阶段：
 
 1. **需求分析与设计**
+
    - 分析 xv6 操作系统中的内存管理机制，理解物理内存分配器（kalloc.c）和虚拟内存管理（vm.c）的实现原理。
    - 设计改进方案，包括将物理内存分配器分为内核和用户区域，以提高安全性。
 2. **代码实现**
+
    - 基于 xv6 的代码，重新实现物理内存分配器（pmem.c）和虚拟内存管理器（vmem.c）。
    - 确保代码符合项目的接口和宏定义。
 3. **集成与调试**
+
    - 将新实现的模块集成到项目中，解决编译和链接错误，确保模块能正确工作。
 4. **测试与验证**
+
    - 编写测试用例，验证内存分配和虚拟内存映射的功能正确性。
-5. **文档编写**
-   - 整理实验报告，包括关键数据结构分析、与 xv6 的对比、设计决策理由、源码理解总结等。
 
 ### 实现步骤记录
 
@@ -319,20 +321,118 @@
 
 ## 测试验证部分
 
-（预留 - 待补充实际测试结果和数据）
+- 测试代码
 
-## 功能测试结果
+  ```c++
+  //物理内存
+  #include "riscv.h"
+  #include "lib/print.h"
+  #include "mem/pmem.h"
+  #include "lib/str.h"
 
-（预留 - 待补充功能测试的具体结果）
+  volatile static int started = 0;
 
-## 性能数据
+  volatile static int over_1 = 0, over_2 = 0;
 
-（预留 - 待补充性能测试数据和分析）
+  static int* mem[1024];
 
-## 异常测试
+  int main()
+  {
+      int cpuid = r_tp();
 
-（预留 - 待补充异常情况下的测试结果）
+      if(cpuid == 0) {
 
-## 运行截图/录屏
+          print_init();
+          pmem_init();
 
-（预留 - 待补充运行时的截图或录屏链接）
+          printf("cpu %d is booting!\n", cpuid);
+          __sync_synchronize();
+          started = 1;
+
+          for(int i = 0; i < 512; i++) {
+              mem[i] = pmem_alloc(true);
+              memset(mem[i], 1, PGSIZE);
+              printf("mem = %p, data = %d\n", mem[i], mem[i][0]);
+          }
+          printf("cpu %d alloc over\n", cpuid);
+          over_1 = 1;
+
+          while(over_1 == 0 || over_2 == 0);
+
+          for(int i = 0; i < 512; i++)
+              pmem_free((uint64)mem[i], true);
+          printf("cpu %d free over\n", cpuid);
+
+      } else {
+
+          while(started == 0);
+          __sync_synchronize();
+          printf("cpu %d is booting!\n", cpuid);
+
+          for(int i = 512; i < 1024; i++) {
+              mem[i] = pmem_alloc(true);
+              memset(mem[i], 1, PGSIZE);
+              printf("mem = %p, data = %d\n", mem[i], mem[i][0]);
+          }
+          printf("cpu %d alloc over\n", cpuid);
+          over_2 = 1;
+
+          while(over_1 == 0 || over_2 == 0);
+
+          for(int i = 512; i < 1024; i++)
+              pmem_free((uint64)mem[i], true);
+          printf("cpu %d free over\n", cpuid);  
+
+      }
+      while (1);  
+  }
+  ```
+  ```c++
+  int main()
+  {
+      int cpuid = r_tp();
+
+      if(cpuid == 0) {
+
+          print_init();
+          pmem_init();
+          kvm_init();
+          kvm_inithart();
+
+          printf("cpu %d is booting!\n", cpuid);
+          __sync_synchronize();
+          // started = 1;
+
+          pgtbl_t test_pgtbl = pmem_alloc(true);
+          uint64 mem[5];
+          for(int i = 0; i < 5; i++)
+              mem[i] = (uint64)pmem_alloc(false);
+
+          printf("\ntest-1\n\n");  
+          vm_mappages(test_pgtbl, 0, mem[0], PGSIZE, PTE_R);
+          vm_mappages(test_pgtbl, PGSIZE * 10, mem[1], PGSIZE / 2, PTE_R | PTE_W);
+          vm_mappages(test_pgtbl, PGSIZE * 512, mem[2], PGSIZE - 1, PTE_R | PTE_X);
+          vm_mappages(test_pgtbl, PGSIZE * 512 * 512, mem[2], PGSIZE, PTE_R | PTE_X);
+          vm_mappages(test_pgtbl, VA_MAX - PGSIZE, mem[4], PGSIZE, PTE_W);
+          vm_print(test_pgtbl);
+
+          printf("\ntest-2\n\n");  
+          vm_mappages(test_pgtbl, 0, mem[0], PGSIZE, PTE_W);
+          vm_unmappages(test_pgtbl, PGSIZE * 10, PGSIZE, true);
+          vm_unmappages(test_pgtbl, PGSIZE * 512, PGSIZE, true);
+          vm_print(test_pgtbl);
+
+      } else {
+
+          while(started == 0);
+          __sync_synchronize();
+          printf("cpu %d is booting!\n", cpuid);
+
+      }
+      while (1);  
+  }
+
+  ```
+- 测试结果
+
+  ![1759134543072](image/doc1/1759134543072.png)
