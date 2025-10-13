@@ -8,6 +8,7 @@ typedef struct cpu {
     int origin;     // 第一次关中断前的状态
 } cpu_t;
 
+void    cpu_init(void);
 int     mycpuid(void);
 cpu_t*  mycpu(void);
 

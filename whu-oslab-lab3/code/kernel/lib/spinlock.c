@@ -32,7 +32,7 @@ void pop_off(void)
 bool spinlock_holding(spinlock_t *lk)
 {
   int r;
-  r = ((lk->locked == 1 )&& (lk->cpuid == mycpuid()));
+  r = (lk->locked && (lk->cpuid == mycpuid()));
   return r;
 }
 
@@ -41,18 +41,18 @@ void spinlock_init(spinlock_t *lk, char *name)
 {
   lk->name = name;
   lk->locked = 0;
-  lk->cpuid = 0;
+  lk->cpuid = -1;  // 初始化为无效的 CPU ID
 }
 
 // 获取自旋锁
 void spinlock_acquire(spinlock_t *lk)
 {    
   push_off(); // 禁用中断以避免死锁。
+  
   if(spinlock_holding(lk)){
-    printf("%d %d %d %d,%d\n",mycpuid(),lk->locked,lk->cpuid,((lk->locked == 1 )&& (lk->cpuid == mycpuid())),spinlock_holding(lk));
-    printf("lk name: %s\n", lk->name);
-    panic("acquire");
+    panic("double acquire detected");
   }
+  
   // 在 RISC-V 上，sync_lock_test_and_set 转换为原子交换：
   //   a5 = 1
   //   s1 = &lk->locked
@@ -76,7 +76,7 @@ void spinlock_release(spinlock_t *lk)
   if(!spinlock_holding(lk))
     panic("release");
 
-  lk->cpuid = 0;
+  lk->cpuid = -1;  // 重置为无效的 CPU ID
 
   // 告诉 C 编译器和 CPU 不要移动加载或存储
   // 超过此点，以确保临界区中的所有存储
