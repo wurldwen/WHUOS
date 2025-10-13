@@ -77,7 +77,6 @@ void spinlock_release(spinlock_t *lk)
     panic("release");
 
   lk->cpuid = -1;  // 重置为无效的 CPU ID
-
   // 告诉 C 编译器和 CPU 不要移动加载或存储
   // 超过此点，以确保临界区中的所有存储
   // 在锁释放之前对其他 CPU 可见，
@@ -85,7 +84,6 @@ void spinlock_release(spinlock_t *lk)
   // 锁释放之前发生。
   // 在 RISC-V 上，这会发出一个 fence 指令。
   __sync_synchronize();
-
   // 释放锁，等价于 lk->locked = 0。
   // 此代码不使用 C 赋值，因为 C 标准
   // 暗示赋值可能使用
