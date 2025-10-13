@@ -160,6 +160,264 @@
 - **问题**: 编译时出现 -Werror=implicit-function-declaration，导致编译失败。
 - **解决方案**: 移除未实现的函数调用，或添加函数声明。
 
+##### 5. 自旋锁使用导致的 panic 问题
+
+- **问题描述**: 在测试物理内存分配器时，使用自旋锁保护共享变量会导致系统 panic，报错信息为 "panic: double acquire detected"。具体表现为：
+
+  - 在不使用锁时，内存分配和释放功能正常
+  - 一旦在循环中使用 `spinlock_acquire()` 和 `spinlock_release()` 保护临界区，系统就会触发 panic
+  - 单次获取和释放锁可以正常工作，但在循环中频繁获取释放锁时就会出现问题
+- **问题排查过程**:
+
+  1. **初步分析**: 怀疑是重复获取锁导致的，但检查代码逻辑发现并没有嵌套获取同一个锁。
+  2. **调试信息**: 在 `spinlock_acquire` 中添加调试输出，发现 panic 时的状态显示：
+     - `mycpuid()` = 0
+     - `lk->locked` = 0 或 1（不一致）
+     - `lk->cpuid` = 0
+     - 但 `spinlock_holding(lk)` 却返回 true
+  3. **深入分析**: 发现在调用 `spinlock_holding()` 检查时和打印调试信息时，锁的状态不一致，说明存在竞态条件。
+  4. **根本原因定位**:
+     - 问题出在 `spinlock_init()` 函数中，将 `lk->cpuid` 初始化为 0
+     - 同时 `spinlock_release()` 函数在释放锁后也将 `lk->cpuid` 重置为 0
+     - 而 CPU 0 的 ID 正好也是 0，导致以下问题：
+       - 在锁未被持有时，`lk->cpuid == 0`
+       - 当 CPU 0 尝试获取锁时，`spinlock_holding()` 检查 `(lk->locked && lk->cpuid == mycpuid())`
+       - 在特定的时序下（例如释放锁后、或初始化状态），`lk->cpuid` 为 0 与 CPU 0 的 ID 相同
+       - 导致 `spinlock_holding()` 误判为 CPU 0 已经持有该锁，从而触发 "double acquire" panic
+- **解决方案**:
+
+  1. **修改初始化值**: 将 `spinlock_init()` 中的 `lk->cpuid` 初始化值从 0 改为 -1（表示无效的 CPU ID）
+  2. **修改释放后的值**: 将 `spinlock_release()` 中释放锁后的 `lk->cpuid` 重置值也改为 -1
+  3. **添加 CPU 初始化**: 在 `main()` 函数开始时，添加 `cpu_init()` 函数显式初始化所有 CPU 的结构体（`cpu_t` 中的 `noff` 和 `origin` 字段）
+  4. **优化检查逻辑**: 简化 `spinlock_holding()` 的判断逻辑为 `(lk->locked && (lk->cpuid == mycpuid()))`
+- **代码修改**:
+
+  在 `kernel/lib/spinlock.c` 中：
+
+  ```c
+  // 自旋锁初始化
+  void spinlock_init(spinlock_t *lk, char *name)
+  {
+    lk->name = name;
+    lk->locked = 0;
+    lk->cpuid = -1;  // 初始化为无效的 CPU ID，避免与 CPU 0 冲突
+  }
+
+  // 释放自旋锁
+  void spinlock_release(spinlock_t *lk)
+  {
+    if(!spinlock_holding(lk))
+      panic("release");
+
+    lk->cpuid = -1;  // 重置为无效的 CPU ID
+
+    __sync_synchronize();
+    __sync_lock_release(&lk->locked);
+    pop_off();
+  }
+
+  // 检查是否持有锁
+  bool spinlock_holding(spinlock_t *lk)
+  {
+    int r;
+    r = (lk->locked && (lk->cpuid == mycpuid()));
+    return r;
+  }
+  ```
+
+  在 `kernel/proc/proc.c` 中添加 CPU 初始化函数：
+
+  ```c
+  void cpu_init(void)
+  {
+      // 显式初始化所有 CPU 结构
+      for(int i = 0; i < NCPU; i++) {
+          cpus[i].noff = 0;
+          cpus[i].origin = 0;
+      }
+  }
+  ```
+
+  在 `kernel/boot/main.c` 中调用初始化：
+
+  ```c
+  int main()
+  {
+      int cpuid = r_tp();
+      if(cpuid == 0) {
+          cpu_init();           // 初始化 CPU 结构
+          spinlock_init(&sum_lock, "sum");
+          print_init();
+          // ...
+      }
+      // ...
+  }
+  ```
+- **经验教训**:
+
+  1. **避免使用 0 作为特殊值**: 在设计数据结构时，应该避免使用 0 或其他可能与有效值重叠的数字作为"无效"或"未初始化"的标记值，建议使用 -1 或其他明确的无效值。
+  2. **多核并发的复杂性**: 在多核环境下，即使看似简单的初始化值也可能引发竞态条件和难以调试的问题。
+  3. **调试技巧**: 当遇到状态不一致的问题时，可能是竞态条件导致的。在调试输出时，状态可能已经被其他操作改变。
+  4. **全面的初始化**: 所有全局或静态数据结构都应该显式初始化，不要依赖 C 语言的默认零初始化，特别是在多核环境中。
+
+##### 6. 虚拟内存映射相关问题
+
+###### 6.1 vm_mappages 不允许重新映射导致的 panic
+
+- **问题描述**: 在测试虚拟内存映射功能时，尝试修改已有映射的权限（如从只读改为只写）会触发 panic，报错信息为 "panic: vm_mappages: remap"。具体测试场景：
+
+  ```c
+  // test-1: 首次映射虚拟地址 0，权限为只读
+  vm_mappages(test_pgtbl, 0, mem[0], PGSIZE, PTE_R);
+
+  // test-2: 尝试修改虚拟地址 0 的映射权限为只写
+  vm_mappages(test_pgtbl, 0, mem[0], PGSIZE, PTE_W);  // ← 触发 panic
+  ```
+- **问题根源**: 在 `vm_mappages` 函数中有严格的重映射检查：
+
+  ```c
+  pte_t *pte = vm_getpte(pgtbl, a, true);
+  if (!pte)
+      panic("vm_mappages: out of memory");
+  if (*pte & PTE_V)  // ← 检测到 PTE 已经有效
+      panic("vm_mappages: remap");  // ← 直接 panic，不允许更新映射
+  ```
+
+  这种设计虽然可以防止意外的重复映射，但过于严格，不支持合法的权限修改需求。
+- **设计考量**:
+
+  - **禁止 remap 的理由**:
+
+    1. 防止内存泄漏：旧的物理页映射被覆盖后无法追踪和释放
+    2. 防止权限混乱：不经意地改变已有映射的权限可能导致安全问题
+    3. 检测编程错误：通常重复映射是逻辑错误的信号
+  - **允许 remap 的场景**:
+
+    1. 修改页面权限（如从只读改为可写，用于写时复制）
+    2. 更新物理页映射（如页面换出/换入）
+    3. 调试和测试场景
+- **解决方案**: 允许更新已有映射，移除或修改过于严格的检查：
+
+  ```c
+  void vm_mappages(pgtbl_t pgtbl, uint64 va, uint64 pa, uint64 len, int perm)
+  {
+      if (len == 0)
+          panic("vm_mappages: len == 0");
+
+      uint64 a = PG_ROUND_DOWN(va);
+      uint64 last = PG_ROUND_DOWN(va + len - 1);
+
+      for (;;) {
+          pte_t *pte = vm_getpte(pgtbl, a, true);
+          if (!pte)
+              panic("vm_mappages: out of memory");
+
+          // 移除严格的 remap 检查，允许更新已有映射
+          // if (*pte & PTE_V)
+          //     panic("vm_mappages: remap");
+
+          *pte = PA_TO_PTE(pa) | perm | PTE_V;
+          if (a == last)
+              break;
+          a += PGSIZE;
+          pa += PGSIZE;
+      }
+  }
+  ```
+
+###### 6.2 vm_unmappages 物理页释放时的区域判断错误
+
+- **问题描述**: 在测试中释放映射的物理页时触发 panic，报错信息为 "panic: pmem_free: page out of range"。具体场景：
+
+  ```c
+  // test-1: 从用户区分配物理页并建立映射
+  mem[1] = (uint64)pmem_alloc(false);  // false 表示用户区
+  vm_mappages(test_pgtbl, PGSIZE * 10, mem[1], PGSIZE, PTE_R | PTE_W);
+
+  // test-2: 解除映射并释放物理页
+  vm_unmappages(test_pgtbl, PGSIZE * 10, PGSIZE, true);  // ← 触发 panic
+  ```
+- **问题根源**: 原始 `vm_unmappages` 函数硬编码将物理页释放到内核区：
+
+  ```c
+  void vm_unmappages(pgtbl_t pgtbl, uint64 va, uint64 len, bool freeit)
+  {
+      // ...
+      if (freeit) {
+          uint64 pa = PTE_TO_PA(*pte);
+          pmem_free(pa, true);  // ← 硬编码 true，总是释放到内核区
+      }
+      // ...
+  }
+  ```
+
+  当物理页实际上是从用户区分配的（`pmem_alloc(false)`），但却尝试释放到内核区时，`pmem_free` 会检查地址范围并触发 panic。
+- **pmem_free 的区域检查逻辑**:
+
+  ```c
+  void pmem_free(uint64 page, bool in_kernel)
+  {
+      alloc_region_t *r = in_kernel ? &kern_region : &user_region;
+
+      // 检查页面是否在指定区域范围内
+      if (page < r->begin || page >= r->end)
+          panic("pmem_free: page out of range");
+      // ...
+  }
+  ```
+- **解决方案**: 自动检测物理页属于哪个区域，然后释放到正确的区域：
+
+  ```c
+  void vm_unmappages(pgtbl_t pgtbl, uint64 va, uint64 len, bool freeit)
+  {
+      if ((va % PGSIZE) != 0)
+          panic("vm_unmappages: not aligned");
+
+      uint64 a;
+      for (a = va; a < va + len; a += PGSIZE) {
+          pte_t *pte = vm_getpte(pgtbl, a, false);
+          if (!pte)
+              panic("vm_unmappages: walk");
+          if (!(*pte & PTE_V))
+              panic("vm_unmappages: not mapped");
+          if (PTE_FLAGS(*pte) == PTE_V)
+              panic("vm_unmappages: not a leaf");
+
+          if (freeit) {
+              uint64 pa = PTE_TO_PA(*pte);
+
+              // 自动判断物理页属于哪个区域
+              uint64 kern_end = (uint64)ALLOC_BEGIN + KERNEL_PAGES * PGSIZE;
+              bool in_kernel = (pa >= (uint64)ALLOC_BEGIN && pa < kern_end);
+
+              // 释放到正确的区域
+              pmem_free(pa, in_kernel);
+          }
+          *pte = 0;
+      }
+  }
+  ```
+- **替代方案**: 如果希望调用者明确指定释放区域，可以添加参数：
+
+  ```c
+  void vm_unmappages_ex(pgtbl_t pgtbl, uint64 va, uint64 len, 
+                        bool freeit, bool free_to_kernel)
+  {
+      // ...
+      if (freeit) {
+          uint64 pa = PTE_TO_PA(*pte);
+          pmem_free(pa, free_to_kernel);
+      }
+      // ...
+  }
+  ```
+- **经验教训**:
+
+  1. **避免硬编码假设**: 不要假设所有映射的物理页都来自同一个区域（内核区或用户区）。
+  2. **自动化判断优于手动指定**: 通过地址范围自动判断区域归属，比要求调用者手动指定更不容易出错。
+  3. **接口设计的一致性**: `pmem_alloc` 需要指定区域，`pmem_free` 也应该能正确对应，避免分配和释放的区域不匹配。
+  4. **测试覆盖不同场景**: 测试应该覆盖内核页和用户页的分配、映射、解除映射和释放，确保所有路径都正确。
+
 ### 源码理解总结
 
 #### 物理内存管理
@@ -197,7 +455,7 @@
     - 零额外内存管理开销（元数据就位于空闲页面内部）。
   - **缺点**：
     - 只支持固定大小的块（整页），不能用于细粒度分配。
-    - 不支持合并（coalescing）或块分裂（splitting），因此碎片化控制能力有限（但在整页分配场景下碎片不像小粒度分配那样严重）。
+    - 不支持合并或块分裂，因此碎片化控制能力有限（但在整页分配场景下碎片不像小粒度分配那样严重）。
     - 无内置安全检查或双重释放检测（需要额外机制来增强可靠性）。
     - 并发性能受限于全局锁（单个 freelist lock 会在高并发下成为瓶颈）。
 
@@ -436,3 +694,5 @@
 - 测试结果
 
   ![1759134543072](image/doc1/1759134543072.png)
+
+  ![1760343704604](image/doc1/1760343704604.png)

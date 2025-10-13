@@ -51,6 +51,7 @@ pte_t* vm_getpte(pgtbl_t pgtbl, uint64 va, bool alloc)
 
 // 将虚拟地址区间 [va, va+len) 映射到物理地址区间 [pa, pa+len)
 // len 以字节为单位，可能未按页对齐。perm 使用 PTE_* 权限位。
+// 如果 PTE 已经有效，则更新映射（允许 remap）
 void vm_mappages(pgtbl_t pgtbl, uint64 va, uint64 pa, uint64 len, int perm)
 {
     if (len == 0)
@@ -63,9 +64,12 @@ void vm_mappages(pgtbl_t pgtbl, uint64 va, uint64 pa, uint64 len, int perm)
         pte_t *pte = vm_getpte(pgtbl, a, true);
         if (!pte)
             panic("vm_mappages: out of memory");
-        if (*pte & PTE_V)
-            panic("vm_mappages: remap");
-    *pte = PA_TO_PTE(pa) | perm | PTE_V;
+        
+        // 允许更新已有映射（remap），不再 panic
+        // if (*pte & PTE_V)
+        //     panic("vm_mappages: remap");
+        
+        *pte = PA_TO_PTE(pa) | perm | PTE_V;
         if (a == last)
             break;
         a += PGSIZE;
@@ -90,7 +94,10 @@ void vm_unmappages(pgtbl_t pgtbl, uint64 va, uint64 len, bool freeit)
             panic("vm_unmappages: not a leaf");
         if (freeit) {
             uint64 pa = PTE_TO_PA(*pte);
-            pmem_free(pa, true); // free kernel-allocated physical page
+            // 自动检测页面属于内核区还是用户区
+            uint64 kern_end = (uint64)ALLOC_BEGIN + KERNEL_PAGES * PGSIZE;
+            bool in_kernel = (pa >= (uint64)ALLOC_BEGIN && pa < kern_end);
+            pmem_free(pa, in_kernel);
         }
         *pte = 0;
     }
