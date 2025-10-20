@@ -54,25 +54,49 @@ extern void kernel_vector();
 // 初始化trap中全局共享的东西
 void trap_kernel_init()
 {
-
+    // 初始化系统时钟
+    timer_create();
 }
 
 // 各个核心trap初始化
 void trap_kernel_inithart()
 {
-
+    // 设置S-mode的trap处理函数入口为kernel_vector
+    w_stvec((uint64)kernel_vector);
 }
 
 // 外设中断处理 (基于PLIC)
 void external_interrupt_handler()
 {
+    // 获取中断号
+    int irq = plic_claim();
 
+    if (irq == UART_IRQ) {
+        // UART 串口中断
+        uart_intr();
+    } else if (irq) {
+        // 未知的外设中断
+        printk("Unexpected external interrupt irq=%d\n", irq);
+    }
+
+    // 通知PLIC该中断已处理完成
+    if (irq) {
+        plic_complete(irq);
+    }
 }
 
 // 时钟中断处理 (基于CLINT)
 void timer_interrupt_handler()
 {
+    // 清除S-mode软件中断挂起位
+    // M-mode时钟中断通过设置SIP_SSIP位来触发S-mode软件中断
+    w_sip(r_sip() & ~2);
 
+    // 更新系统时钟
+    timer_update();
+
+    // 打印时钟中断信息
+    printk("Timer interrupt: ticks = %d\n", timer_get_ticks());
 }
 
 // 在kernel_vector()里面调用
@@ -91,4 +115,30 @@ void trap_kernel_handler()
     int trap_id = scause & 0xf; 
 
     // 中断异常处理核心逻辑
+    if (scause & (1ULL << 63)) {
+        // 这是一个中断 (scause最高位为1)
+        switch (trap_id) {
+            case 1:
+                // S-mode 软件中断 (由M-mode时钟中断转发而来)
+                timer_interrupt_handler();
+                break;
+            case 5:
+                // S-mode 时钟中断
+                printk("S-mode timer interrupt\n");
+                break;
+            case 9:
+                // S-mode 外设中断
+                external_interrupt_handler();
+                break;
+            default:
+                printk("Unknown interrupt: %s\n", interrupt_info[trap_id]);
+                break;
+        }
+    } else {
+        // 这是一个异常 (scause最高位为0)
+        printk("Exception in kernel at sepc=0x%lx: %s\n", 
+               sepc, exception_info[trap_id]);
+        printk("  stval = 0x%lx\n", stval);
+        panic("Unhandled exception in kernel mode");
+    }
 }
