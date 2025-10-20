@@ -562,160 +562,80 @@ static uint64 mscratch[NCPU][5];
 
 ## 六、实验测试
 
-### 6.1 编译和运行
+### 6.1 时钟中断测试
 
-```bash
-cd whu-oslab-lab3/code
-make clean
-make
-make qemu
-```
+**测试代码**：
 
-### 6.2 测试结果
+```c++
+#include "riscv.h"
+#include "lib/print.h"
+#include "dev/uart.h"
+#include "dev/plic.h"
+#include "trap/trap.h"
 
-#### 6.2.1 启动输出
-
-**预期输出**：
-
-```
-=== WHU OS Lab 3: Interrupt Test ===
-Initializing devices and interrupt system...
-
-UART initialized
-PLIC initialized
-Trap system initialized
-Interrupts enabled
-
-CPU 0 is ready!
-Waiting for timer interrupts...
-(You can also type characters to test UART interrupt)
-```
-
-#### 6.2.2 时钟中断测试
-
-**预期输出**:
-
-```
-Timer interrupt: ticks = 1
-Timer interrupt: ticks = 2
-Timer interrupt: ticks = 3
-Timer interrupt: ticks = 4
-...
-```
-
-**测试结果**: 
-
-#### 6.2.3 UART 中断测试
-
-**测试步骤**:
-
-1. 在 QEMU 终端输入 "hello"
-2. 观察输出
-
-**预期行为**: 字符被回显
-
-```
-输入: hello
-输出: hello
-```
-
-**测试结果**: 
-
-#### 6.2.4 多核测试
-
-**启动命令**:
-
-```bash
-make qemu CPUS=2
-```
-
-**预期输出**:
-
-```
-CPU 0 is ready!
-Waiting for timer interrupts...
-CPU 1 is ready!
-Timer interrupt: ticks = 1
-Timer interrupt: ticks = 2
-...
-```
-
----
-
-## 附录 A: 文件清单
-
-### 实现的文件
-
-- `kernel/dev/timer.c` - 时钟管理
-- `kernel/trap/trap_kernel.c` - 内核态中断处理
-- `kernel/boot/start.c` - M-mode 启动 (修改)
-- `kernel/boot/main.c` - S-mode 主函数 (修改)
-
-### 支持文件
-
-- `kernel/trap/trap.S` - 汇编中断入口
-- `kernel/dev/plic.c` - PLIC 驱动
-- `kernel/dev/uart.c` - UART 驱动
-
-### 头文件
-
-- `include/dev/timer.h` - 时钟接口
-- `include/dev/plic.h` - PLIC 接口
-- `include/dev/uart.h` - UART 接口
-- `include/trap/trap.h` - Trap 接口
-- `include/riscv.h` - CSR 寄存器操作
-- `include/memlayout.h` - 内存映射定义
-
----
-
-## 附录 B: 关键代码清单
-
-### B.1 时钟初始化 (timer_init)
-
-```c
-void timer_init()
+volatile static int started = 0;
+int main()
 {
-    int hartid = r_mhartid();
-    *(uint64*)CLINT_MTIMECMP(hartid) = *(uint64*)CLINT_MTIME + INTERVAL;
-    uint64 *scratch = &mscratch[hartid][0];
-    scratch[3] = CLINT_MTIMECMP(hartid);
-    scratch[4] = INTERVAL;
-    w_mscratch((uint64)scratch);
-    w_mtvec((uint64)timer_vector);
-    w_mstatus(r_mstatus() | MSTATUS_MIE);
-    w_mie(r_mie() | MIE_MTIE);
-}
-```
+    int cpuid = r_tp();
 
-### B.2 中断处理器 (trap_kernel_handler)
+    if(cpuid == 0) {
+        // CPU 0: 主核心初始化
+        print_init();
 
-```c
-void trap_kernel_handler()
-{
-    uint64 scause = r_scause();
-    int trap_id = scause & 0xf;
+        printf("\n=== WHU OS Lab 3: Timer Interrupt Test ===\n");
+        printf("Testing timer interrupts only...\n\n");
 
-    if (scause & (1ULL << 63)) {
-        // 中断
-        switch (trap_id) {
-            case 1: timer_interrupt_handler(); break;
-            case 9: external_interrupt_handler(); break;
-        }
+        // 初始化trap系统（用于处理时钟中断）
+        trap_kernel_init();       // 初始化内核trap系统（包括timer_create）
+        trap_kernel_inithart();   // 初始化当前核心的trap（设置stvec）
+
+        printf("Trap system initialized\n");
+
+        // 使能中断
+        intr_on();
+        printf("Interrupts enabled\n\n");
+
+        printf("CPU %d is booting!\n", cpuid);
+        printf("Waiting for timer interrupts...\n");
+        printf("Timer interrupt occurs approximately every 0.1 seconds (INTERVAL=1000000)\n");
+        printf("- Each 'T' represents one timer tick\n");
+        printf("- Ticks count is displayed every 10 interrupts\n");
+        printf("- You can modify INTERVAL in include/dev/timer.h to test different speeds\n\n");
+    
+        __sync_synchronize();
+        started = 1;  // 允许其他CPU继续启动
+
     } else {
-        // 异常
-        printk("Exception: %s\n", exception_info[trap_id]);
-        panic("Unhandled exception");
+        // 其他CPU核心初始化
+        while(started == 0);
+        __sync_synchronize();
+    
+        // 其他CPU核心也需要初始化trap
+        trap_kernel_inithart();   // 初始化当前核心的trap
+    
+        // 使能中断
+        intr_on();
+    
+        printf("CPU %d is booting!\n", cpuid);
+    }
+
+    // 主循环：等待中断
+    while (1) {
+        // 可以在这里添加其他测试代码
+        // 中断会自动被处理
     }
 }
+
 ```
 
-### B.3 时钟中断处理 (timer_interrupt_handler)
+**测试结果**:
 
-```c
-void timer_interrupt_handler()
-{
-    w_sip(r_sip() & ~2);
-    timer_update();
-    printk("Timer interrupt: ticks = %d\n", timer_get_ticks());
-}
-```
+多核输出![1760946205872](image/doc/1760946205872.png)只让CPU0输出![1760946489691](image/doc/1760946489691.png)
+
+### 6.2 UART 中断测试
+
+**测试代码**：
+
+**测试结果**:
+
+---

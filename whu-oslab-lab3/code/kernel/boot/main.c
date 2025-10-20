@@ -13,8 +13,8 @@ int main()
         // CPU 0: 主核心初始化
         print_init();
 
-        printf("\n=== WHU OS Lab 3: Interrupt Test ===\n");
-        printf("Initializing devices and interrupt system...\n\n");
+        printf("\n=== WHU OS Lab 3: External Interrupt Test ===\n");
+        printf("Testing UART external interrupts...\n\n");
 
         // 初始化设备和中断系统
         uart_init();              // 初始化UART串口
@@ -22,7 +22,7 @@ int main()
         trap_kernel_init();       // 初始化内核trap系统
         trap_kernel_inithart();   // 初始化当前核心的trap
         plic_inithart();          // 初始化当前核心的PLIC
-        
+
         printf("UART initialized\n");
         printf("PLIC initialized\n");
         printf("Trap system initialized\n");
@@ -32,8 +32,10 @@ int main()
         printf("Interrupts enabled\n\n");
 
         printf("CPU %d is ready!\n", cpuid);
-        printf("Waiting for timer interrupts...\n");
-        printf("(You can also type characters to test UART interrupt)\n\n");
+        printf("=== UART External Interrupt Test ===\n");
+        printf("Please type characters to test UART interrupt.\n");
+        printf("Each character you type will trigger an external interrupt.\n");
+        printf("Press Ctrl+A then X to exit QEMU.\n\n");
         
         __sync_synchronize();
         started = 1;  // 允许其他CPU继续启动

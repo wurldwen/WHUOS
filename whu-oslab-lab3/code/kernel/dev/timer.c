@@ -53,23 +53,23 @@ void timer_create()
 {
     // 初始化系统时钟
     sys_timer.ticks = 0;
-    initlock(&sys_timer.lk, "timer");
+    spinlock_init(&sys_timer.lk, "timer");
 }
 
 // 时钟更新(ticks++ with lock)
 void timer_update()
 {
-    acquire(&sys_timer.lk);
+    spinlock_acquire(&sys_timer.lk);
     sys_timer.ticks++;
-    release(&sys_timer.lk);
+    spinlock_release(&sys_timer.lk);
 }
 
 // 返回系统时钟ticks
 uint64 timer_get_ticks()
 {
     uint64 ticks;
-    acquire(&sys_timer.lk);
+    spinlock_acquire(&sys_timer.lk);
     ticks = sys_timer.ticks;
-    release(&sys_timer.lk);
+    spinlock_release(&sys_timer.lk);
     return ticks;
 }

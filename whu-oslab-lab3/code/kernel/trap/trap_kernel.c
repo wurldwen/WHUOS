@@ -73,10 +73,12 @@ void external_interrupt_handler()
 
     if (irq == UART_IRQ) {
         // UART 串口中断
-        uart_intr();
+        printf("\n[External Interrupt] UART IRQ=%d detected\n", irq);
+        uart_intr();  // 这个函数会读取并回显字符
+        printf("[External Interrupt] UART interrupt handled\n\n");
     } else if (irq) {
         // 未知的外设中断
-        printk("Unexpected external interrupt irq=%d\n", irq);
+        printf("Unexpected external interrupt irq=%d\n", irq);
     }
 
     // 通知PLIC该中断已处理完成
@@ -95,8 +97,31 @@ void timer_interrupt_handler()
     // 更新系统时钟
     timer_update();
 
-    // 打印时钟中断信息
-    printk("Timer interrupt: ticks = %d\n", timer_get_ticks());
+    // 外设中断测试时，时钟中断只更新ticks，不输出
+    // 如果需要测试时钟中断，请取消下面的注释
+
+    // // 获取当前ticks值
+    // int ticks = timer_get_ticks();
+    // // 获取当前CPU ID
+    // int cpuid = r_tp();
+
+    // // 只让CPU 0输出，避免多核输出混乱
+    // // 只在ticks <= 50时输出
+    // if (cpuid == 0 && ticks <= 50) {
+    //     // 1. 时钟滴答测试：输出"T"字符表示时钟滴答
+    //     printf("T");
+
+    //     // 2. 时钟快慢测试：每10次滴答输出一次ticks值
+    //     if (ticks % 10 == 0) {
+    //         printf("\nticks = %d\n", ticks);
+    //     }
+
+    //     // 到达50时输出提示信息
+    //     if (ticks == 50) {
+    //         printf("\n\n=== Timer interrupt test completed (ticks = 50) ===\n");
+    //         printf("Timer is still running but output is disabled.\n\n");
+    //     }
+    // }
 }
 
 // 在kernel_vector()里面调用
@@ -124,21 +149,21 @@ void trap_kernel_handler()
                 break;
             case 5:
                 // S-mode 时钟中断
-                printk("S-mode timer interrupt\n");
+                printf("S-mode timer interrupt\n");
                 break;
             case 9:
                 // S-mode 外设中断
                 external_interrupt_handler();
                 break;
             default:
-                printk("Unknown interrupt: %s\n", interrupt_info[trap_id]);
+                printf("Unknown interrupt: %s\n", interrupt_info[trap_id]);
                 break;
         }
     } else {
         // 这是一个异常 (scause最高位为0)
-        printk("Exception in kernel at sepc=0x%lx: %s\n", 
+        printf("Exception in kernel at sepc=0x%lx: %s\n", 
                sepc, exception_info[trap_id]);
-        printk("  stval = 0x%lx\n", stval);
+        printf("  stval = 0x%lx\n", stval);
         panic("Unhandled exception in kernel mode");
     }
 }
