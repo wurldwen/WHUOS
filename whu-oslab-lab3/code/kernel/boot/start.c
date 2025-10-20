@@ -1,4 +1,5 @@
 #include "riscv.h"
+#include "dev/timer.h"
 
 //为每一个核设置初始启动时的C语言栈帧空间
 __attribute__ ((aligned (16))) uint8 CPU_stack[4096 * NCPU];
@@ -33,6 +34,9 @@ start()
   // access to all of physical memory.
   w_pmpaddr0(0x3fffffffffffffull);
   w_pmpcfg0(0xf);
+
+  // 初始化时钟中断 (M-mode)
+  timer_init();
 
   // CPU的hartid存入tp寄存器，方便S-Mode读取
   int id = r_mhartid();

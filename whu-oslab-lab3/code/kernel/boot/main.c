@@ -1,90 +1,61 @@
 #include "riscv.h"
 #include "lib/print.h"
-#include "mem/pmem.h"
-#include "mem/vmem.h"
-#include "lib/str.h"
+#include "dev/uart.h"
+#include "dev/plic.h"
+#include "trap/trap.h"
+
 volatile static int started = 0;
 int main()
 {
     int cpuid = r_tp();
 
     if(cpuid == 0) {
-
+        // CPU 0: 主核心初始化
         print_init();
-        pmem_init();
-        kvm_init();
-        kvm_inithart();
 
-        printf("cpu %d is booting!\n", cpuid);
+        printf("\n=== WHU OS Lab 3: Interrupt Test ===\n");
+        printf("Initializing devices and interrupt system...\n\n");
+
+        // 初始化设备和中断系统
+        uart_init();              // 初始化UART串口
+        plic_init();              // 初始化PLIC中断控制器
+        trap_kernel_init();       // 初始化内核trap系统
+        trap_kernel_inithart();   // 初始化当前核心的trap
+        plic_inithart();          // 初始化当前核心的PLIC
+        
+        printf("UART initialized\n");
+        printf("PLIC initialized\n");
+        printf("Trap system initialized\n");
+
+        // 使能中断
+        intr_on();
+        printf("Interrupts enabled\n\n");
+
+        printf("CPU %d is ready!\n", cpuid);
+        printf("Waiting for timer interrupts...\n");
+        printf("(You can also type characters to test UART interrupt)\n\n");
+        
         __sync_synchronize();
-        // started = 1;
-
-        pgtbl_t test_pgtbl = pmem_alloc(true);
-        uint64 mem[5];
-        for(int i = 0; i < 5; i++) {
-            mem[i] = (uint64)pmem_alloc(false);
-            printf("mem[%d] = %p\n", i, (void*)mem[i]);
-        }
-
-        printf("\ntest-1\n\n");    
-        vm_mappages(test_pgtbl, 0, mem[0], PGSIZE, PTE_R);
-        vm_mappages(test_pgtbl, PGSIZE * 10, mem[1], PGSIZE / 2, PTE_R | PTE_W);
-        vm_mappages(test_pgtbl, PGSIZE * 512, mem[2], PGSIZE - 1, PTE_R | PTE_X);
-        vm_mappages(test_pgtbl, PGSIZE * 512 * 512, mem[2], PGSIZE, PTE_R | PTE_X);
-        vm_mappages(test_pgtbl, VA_MAX - PGSIZE, mem[4], PGSIZE, PTE_W);
-        vm_print(test_pgtbl);
-
-        printf("\ntest-2\n\n");    
-        vm_mappages(test_pgtbl, 0, mem[0], PGSIZE, PTE_W);
-        vm_unmappages(test_pgtbl, PGSIZE * 10, PGSIZE, true);
-        vm_unmappages(test_pgtbl, PGSIZE * 512, PGSIZE, true);
-        vm_print(test_pgtbl);
+        started = 1;  // 允许其他CPU继续启动
 
     } else {
-
+        // 其他CPU核心初始化
         while(started == 0);
         __sync_synchronize();
-        printf("cpu %d is booting!\n", cpuid);
-         
+        
+        // 其他CPU核心也需要初始化trap和plic
+        trap_kernel_inithart();   // 初始化当前核心的trap
+        plic_inithart();          // 初始化当前核心的PLIC
+        
+        // 使能中断
+        intr_on();
+        
+        printf("CPU %d is ready!\n", cpuid);
     }
-    while (1);    
+
+    // 主循环：等待中断
+    while (1) {
+        // 可以在这里添加其他测试代码
+        // 中断会自动被处理
+    }
 }
-
-// #include "riscv.h"
-// #include "lib/print.h"
-// #include "lib/lock.h"
-// #include "proc/proc.h"
-// volatile static int started = 0;
-// volatile static int sum = 0;
-// static spinlock_t sum_lock;
-
-// int main()
-// {
-//     int cpuid = r_tp();
-//     if(cpuid == 0) {
-//         cpu_init();
-//         spinlock_init(&sum_lock, "sum");
-//         print_init();
-//         printf("cpu %d is booting!\n", cpuid);    
-//         __sync_synchronize();
-//         started = 1;
-//         for(int i = 0; i < 10000; i++) {
-//             spinlock_acquire(&sum_lock);
-//             sum++;
-//             spinlock_release(&sum_lock);
-//         }
-//         printf("cpu %d report: sum = %d\n", cpuid, sum);
-//     } else {
-//         while(started == 0);
-//         __sync_synchronize();
-//         printf("cpu %d is booting!\n", cpuid);
-//         for(int i = 0; i < 10000; i++) {
-//             spinlock_acquire(&sum_lock);
-//             sum++;
-//             spinlock_release(&sum_lock);
-//         }
-//         printf("cpu %d report: sum = %d\n", cpuid, sum);
-//     }   
-//     while (1);    
-// }  
-//为什么放临界区可能没输出，死锁了吗
