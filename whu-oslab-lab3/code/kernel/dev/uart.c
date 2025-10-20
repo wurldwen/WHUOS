@@ -40,9 +40,9 @@ void uart_init(void)
   // 进入设置比特率的模式
   WriteReg(LCR, LCR_BAUD_LATCH);
 
-  // 设置比特率的低位和高位，最终设置为115200 (QEMU virt 默认)
-  WriteReg(0, 13);
-  WriteReg(1, 0);
+  // 设置比特率的低位和高位，最终设置为38.4K
+  WriteReg(0, 0x03);
+  WriteReg(1, 0x00);
 
   // 设置传输字节长度为8bit,不校验
   WriteReg(LCR, LCR_EIGHT_BITS);
@@ -51,7 +51,7 @@ void uart_init(void)
   WriteReg(FCR, FCR_FIFO_ENABLE | FCR_FIFO_CLEAR);
 
   // 只使能接收中断，不使能发送中断
-  // 因为发送是同步的，不需要中断；只有接收需要中断
+  // 发送使用轮询方式(uart_putc_sync)，不需要中断
   WriteReg(IER, IER_RX_ENABLE);
 }
 

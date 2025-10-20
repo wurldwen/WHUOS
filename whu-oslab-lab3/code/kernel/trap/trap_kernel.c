@@ -70,15 +70,10 @@ void external_interrupt_handler()
 {
     // 获取中断号
     int irq = plic_claim();
-
+    
     if (irq == UART_IRQ) {
-        // UART 串口中断
-        printf("\n[External Interrupt] UART IRQ=%d detected\n", irq);
-        uart_intr();  // 这个函数会读取并回显字符
-        printf("[External Interrupt] UART interrupt handled\n\n");
-    } else if (irq) {
-        // 未知的外设中断
-        printf("Unexpected external interrupt irq=%d\n", irq);
+        // UART 串口中断：读取并回显字符
+        uart_intr();
     }
 
     // 通知PLIC该中断已处理完成
