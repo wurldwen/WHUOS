@@ -50,9 +50,8 @@ void uart_init(void)
   // 清零和使能FIFO模式
   WriteReg(FCR, FCR_FIFO_ENABLE | FCR_FIFO_CLEAR);
 
-  // 只使能接收中断，不使能发送中断
-  // 发送使用轮询方式(uart_putc_sync)，不需要中断
-  WriteReg(IER, IER_RX_ENABLE);
+  // 使能输出队列和接收队列的中断
+  WriteReg(IER, IER_TX_ENABLE | IER_RX_ENABLE);
 }
 
 // 单个字符输出
@@ -89,6 +88,17 @@ void uart_intr(void)
   {
     int c = uart_getc_sync();
     if(c == -1) break;
-    uart_putc_sync(c);
+    
+    // 处理退格键（Backspace: ASCII 127 或 8）
+    if(c == 127 || c == 8) {
+      // 发送退格序列：退格 + 空格 + 退格
+      // 这样可以删除屏幕上的字符
+      uart_putc_sync(8);    // 退格，光标左移
+      uart_putc_sync(' ');  // 输出空格，覆盖字符
+      uart_putc_sync(8);    // 再次退格，光标回到原位
+    } else {
+      // 普通字符直接回显
+      uart_putc_sync(c);
+    }
   }
 }
