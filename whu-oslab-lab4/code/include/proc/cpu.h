@@ -11,6 +11,7 @@ typedef struct cpu {
     context_t ctx;  // 内核上下文暂存
 } cpu_t;
 
+void    cpu_init(void);
 int     mycpuid(void);
 cpu_t*  mycpu(void);
 proc_t* myproc(void);

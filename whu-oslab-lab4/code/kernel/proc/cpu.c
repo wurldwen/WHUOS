@@ -1,5 +1,6 @@
 #include "proc/cpu.h"
 #include "riscv.h"
+#include "lib/lock.h"
 
 static cpu_t cpus[NCPU];
 
@@ -30,5 +31,4 @@ proc_t* myproc(void)
     proc_t* p = c->proc;
     pop_off();
     return p;
-}
 }

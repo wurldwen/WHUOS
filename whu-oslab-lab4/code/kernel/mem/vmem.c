@@ -112,16 +112,27 @@ void kvm_init()
 
     // 映射 UART、virtio、PLIC 等设备的 MMIO 区域（使用 memlayout.h 中定义的地址）
     // 设备区域映射
-        vm_mappages(kernel_pgtbl, UART_BASE, UART_BASE, PGSIZE, PTE_R | PTE_W);
-        vm_mappages(kernel_pgtbl, VIRTIO0, VIRTIO0, PGSIZE, PTE_R | PTE_W);
-        vm_mappages(kernel_pgtbl, PLIC_BASE, PLIC_BASE, 0x400000, PTE_R | PTE_W);
+    vm_mappages(kernel_pgtbl, UART_BASE, UART_BASE, PGSIZE, PTE_R | PTE_W);
+    vm_mappages(kernel_pgtbl, VIRTIO0, VIRTIO0, PGSIZE, PTE_R | PTE_W);
+    vm_mappages(kernel_pgtbl, PLIC_BASE, PLIC_BASE, 0x400000, PTE_R | PTE_W);
 
     // 内核代码段：只读 + 可执行
-        vm_mappages(kernel_pgtbl, KERNEL_BASE, KERNEL_BASE, (uint64)etext - KERNEL_BASE, PTE_R | PTE_X);
+    vm_mappages(kernel_pgtbl, KERNEL_BASE, KERNEL_BASE, (uint64)etext - KERNEL_BASE, PTE_R | PTE_X);
     // 内核数据段以及物理内存其余部分：可读 + 可写
     vm_mappages(kernel_pgtbl, (uint64)etext, (uint64)etext, PHYSTOP - (uint64)etext, PTE_R | PTE_W);
 
-    // （先不实现与 trap 相关的内核栈映射）
+    // 映射 trampoline 页（用于用户态和内核态切换）
+    extern char trampoline[];  // defined in trampoline.S
+    vm_mappages(kernel_pgtbl, TRAMPOLINE, (uint64)trampoline, PGSIZE, PTE_R | PTE_X);
+
+    // 为进程 0 分配并映射内核栈
+    // 注意：这里我们为第一个进程预分配内核栈的虚拟地址映射
+    // 实际的物理页会在 proc_make_first() 中分配
+    char *pa = pmem_alloc(true);
+    if(pa == 0)
+        panic("kvm_init: kstack alloc failed");
+    uint64 va = KSTACK(0);
+    vm_mappages(kernel_pgtbl, va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
 }
 
 void kvm_inithart()

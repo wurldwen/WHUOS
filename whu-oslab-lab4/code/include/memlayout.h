@@ -45,7 +45,9 @@
 // map the trapframe page just below TRAMPOLINE, for trampoline.S
 #define TRAPFRAME (TRAMPOLINE - PGSIZE)
 
-#endif
-
+// map kernel stacks beneath the trapframe, each surrounded by invalid guard pages
+// KSTACK(p) computes the virtual address of process p's kernel stack
+// For simplicity in Lab 4, we only support process 0, so we can use a fixed address
+#define KSTACK(p) (TRAPFRAME - ((p)+1)* 2*PGSIZE)
 
 #endif

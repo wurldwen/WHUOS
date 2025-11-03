@@ -5,6 +5,7 @@
 #include "proc/cpu.h"
 #include "proc/initcode.h"
 #include "memlayout.h"
+#include "riscv.h"
 
 // in trampoline.S
 extern char trampoline[];
@@ -13,6 +14,7 @@ extern char trampoline[];
 extern void swtch(context_t* old, context_t* new);
 
 // in trap_user.c
+extern void trap_user_handler();
 extern void trap_user_return();
 
 
@@ -26,8 +28,8 @@ pgtbl_t proc_pgtbl_init(uint64 trapframe)
     pgtbl_t pgtbl;
     uint64 page;
     
-    // 分配一个空的页表
-    page = pmem_alloc();
+    // 分配一个空的页表（内核空间）
+    page = (uint64)pmem_alloc(true);
     if(page == 0) {
         return 0;
     }
@@ -58,9 +60,11 @@ pgtbl_t proc_pgtbl_init(uint64 trapframe)
     code + data (1 page)
     empty space (1 page) 最低的4096字节 不分配物理页，同时不可访问
 */
-void proc_make_fisrt()
+void proc_make_first()
 {
     uint64 page;
+    
+    printf("[proc_make_first] Starting...\n");
     
     // 显式初始化 proczero 结构为 0（重要！）
     memset(&proczero, 0, sizeof(proc_t));
@@ -68,8 +72,8 @@ void proc_make_fisrt()
     // pid 设置
     proczero.pid = 0;
     
-    // 分配 trapframe 物理页
-    page = pmem_alloc();
+    // 分配 trapframe 物理页（内核空间）
+    page = (uint64)pmem_alloc(true);
     assert(page != 0, "proc_make_first: trapframe alloc failed\n");
     proczero.tf = (trapframe_t*)page;
     memset(proczero.tf, 0, PGSIZE);
@@ -78,17 +82,9 @@ void proc_make_fisrt()
     proczero.pgtbl = proc_pgtbl_init((uint64)proczero.tf);
     assert(proczero.pgtbl != 0, "proc_make_first: pgtbl init failed\n");
     
-    // ustack 映射 + 设置 ustack_pages
-    page = pmem_alloc();
-    assert(page != 0, "proc_make_first: ustack alloc failed\n");
-    memset((void*)page, 0, PGSIZE);
-    // 用户栈从 PGSIZE 处开始向上增长（地址 PGSIZE 到 2*PGSIZE）
-    vm_mappages(proczero.pgtbl, PGSIZE, page, PGSIZE, PTE_R | PTE_W | PTE_U);
-    proczero.ustack_pages = 1;
-    
-    // data + code 映射（从地址 PGSIZE 开始，避开最低的 4096 字节）
+    // data + code 映射（从地址 PGSIZE 开始，避开最低的 4096 字节）（用户空间）
     assert(initcode_len <= PGSIZE, "proc_make_first: initcode too big\n");
-    page = pmem_alloc();
+    page = (uint64)pmem_alloc(false);
     assert(page != 0, "proc_make_first: code page alloc failed\n");
     memset((void*)page, 0, PGSIZE);
     // 将 initcode 复制到这个页面
@@ -99,14 +95,21 @@ void proc_make_fisrt()
     // 设置 heap_top（代码页之后）
     proczero.heap_top = 2 * PGSIZE;
     
+    // ustack 映射 + 设置 ustack_pages（用户空间）
+    page = (uint64)pmem_alloc(false);
+    assert(page != 0, "proc_make_first: ustack alloc failed\n");
+    memset((void*)page, 0, PGSIZE);
+    // 用户栈在 heap_top 之上
+    vm_mappages(proczero.pgtbl, proczero.heap_top, page, PGSIZE, PTE_R | PTE_W | PTE_U);
+    proczero.ustack_pages = 1;
+    
     // tf 字段设置
     proczero.tf->epc = PGSIZE;  // 用户程序从 PGSIZE 处开始执行
-    proczero.tf->sp = 2 * PGSIZE;  // 用户栈指针指向栈底（向下增长）
+    proczero.tf->sp = proczero.heap_top + PGSIZE;  // 用户栈指针指向栈顶（向下增长）
     
-    // 内核字段设置
-    proczero.kstack = pmem_alloc();  // 分配内核栈
-    assert(proczero.kstack != 0, "proc_make_first: kstack alloc failed\n");
-    memset((void*)proczero.kstack, 0, PGSIZE);
+    // 内核字段设置（内核栈）
+    // 使用在 kvm_init() 中分配并映射的内核栈
+    proczero.kstack = KSTACK(0);  // 内核栈虚拟地址
     
     proczero.tf->kernel_satp = r_satp();  // 内核页表
     proczero.tf->kernel_sp = proczero.kstack + PGSIZE;  // 内核栈顶
@@ -118,10 +121,20 @@ void proc_make_fisrt()
     proczero.ctx.ra = (uint64)trap_user_return;  // 返回到用户态
     proczero.ctx.sp = proczero.kstack + PGSIZE;  // 内核栈顶
     
+    printf("DEBUG 1: Before mycpu()->proc assignment\n");
     // 设置当前 CPU 的进程指针
-    mycpu()->proc = &proczero;
+    cpu_t* cpu = mycpu();
+    printf("DEBUG 2: mycpu() returned, cpu=%p\n", cpu);
+    cpu->proc = &proczero;
+    printf("DEBUG 3: After assignment\n");
     
     // 上下文切换：从内核调度器切换到第一个用户进程
     printf("Switching to proczero (first user process)...\n");
-    swtch(&(mycpu()->ctx), &(proczero.ctx));
+    printf("  ctx.ra = 0x%lx, ctx.sp = 0x%lx\n", proczero.ctx.ra, proczero.ctx.sp);
+    printf("  About to call swtch()...\n");
+    swtch(&(cpu->ctx), &(proczero.ctx));
+    
+    // 这里不应该被执行到，因为 swtch() 切换到了 trap_user_return
+    printf("ERROR: Returned from swtch()! This should not happen.\n");
+    while(1);
 }

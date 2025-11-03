@@ -62,6 +62,9 @@ void trap_user_return()
 {
     proc_t* p = myproc();
     
+    printf("[trap_user_return] Returning to user mode, epc=0x%lx, sp=0x%lx\n", 
+           p->tf->epc, p->tf->sp);
+    
     // 关中断，避免在切换页表时被打断
     intr_off();
     

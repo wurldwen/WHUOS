@@ -12,6 +12,7 @@
         "pmem.h": "c",
         "proc.h": "c",
         "memlayout.h": "c",
-        "random": "c"
+        "random": "c",
+        "cpu.h": "c"
     }
 }

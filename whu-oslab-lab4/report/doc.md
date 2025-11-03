@@ -1,424 +1,562 @@
-# WHU OS Lab 3 实验报告：中断处理实现
+# WHU OS Lab 4 实验报告：特权级转换与首个用户态进程创建
 
 ## 一、实验目的
 
-本实验旨在实现 RISC-V 操作系统内核的中断处理机制，主要包括：
+本实验旨在实现 RISC-V 操作系统从内核态到用户态的特权级切换机制，并创建首个用户态进程，主要包括：
 
-1. 理解 RISC-V 中断处理的基本原理和流程
-2. 实现 M-mode 时钟中断的初始化和处理
-3. 实现 S-mode 中断分发和处理机制
-4. 实现外设中断（UART）的处理
-5. 掌握中断上下文的保存和恢复
-6. 理解多核环境下的中断处理
+1. 理解 RISC-V 特权级转换的原理和流程
+2. 实现用户态进程的数据结构和内存布局
+3. 实现用户态页表的创建和映射
+4. 实现 Trampoline 机制用于特权级切换
+5. 实现用户态 trap 处理流程
+6. 创建并启动首个用户态进程 proczero
+7. 理解上下文切换机制
 
 ---
 
 ## 二、实验原理
 
-### 2.1 RISC-V 特权级架构
+### 2.1 RISC-V 特权级切换
 
-RISC-V 定义了三个特权级：
+#### 2.1.1 U-mode 到 S-mode 的切换
 
-- **M-mode (Machine Mode)**: 最高特权级，可访问所有硬件资源
-- **S-mode (Supervisor Mode)**: 操作系统内核运行级别
-- **U-mode (User Mode)**: 用户程序运行级别
+当用户态程序执行 trap（系统调用、异常或中断）时，硬件自动完成以下操作：
 
-### 2.2 中断处理机制
+1. 如果是设备中断且 `sstatus.SIE = 0`，不进行切换
+2. 通过置零 `SIE` 禁用中断
+3. 将当前 `pc` 拷贝到 `sepc`
+4. 保存当前特权级到 `sstatus.SPP`
+5. 设置 `scause` 为 trap 原因
+6. 设置当前特权级为 Supervisor
+7. 将 `stvec` 拷贝到 `pc`，跳转到 trap 处理程序
 
-#### 2.2.1 中断类型
+**注意**: CPU 不会自动切换页表或栈，这些需要软件完成。
 
-RISC-V 将 trap 分为两类：
+#### 2.1.2 S-mode 到 U-mode 的切换
 
-- **中断 (Interrupt)**: 异步事件，由外部硬件触发
-  - 时钟中断 (Timer Interrupt)
-  - 外设中断 (External Interrupt)
-  - 软件中断 (Software Interrupt)
-- **异常 (Exception)**: 同步事件，由指令执行引起
-  - 非法指令、页错误、系统调用等
+从内核态返回用户态时，需要手动设置：
 
-#### 2.2.2 关键 CSR 寄存器
+1. 清除 `sstatus.SPP`，将其置为 0（表示返回 U-mode）
+2. 设置 `sstatus.SPIE = 1`，启用用户态中断
+3. 设置 `sepc` 为用户进程的 PC 值
+4. 切换到用户进程的页表（写 `satp`）
+5. 恢复用户态寄存器上下文
+6. 执行 `sret` 指令
 
-| 寄存器            | 功能                       | 读写权限 |
-| ----------------- | -------------------------- | -------- |
-| **stvec**   | S-mode trap 向量基地址     | 读写     |
-| **sepc**    | 异常发生时的 PC            | 读写     |
-| **scause**  | trap 原因 (中断/异常类型)  | 只读     |
-| **stval**   | trap 附加信息 (如出错地址) | 只读     |
-| **sstatus** | S-mode 状态寄存器          | 读写     |
-| **sie**     | S-mode 中断使能            | 读写     |
-| **sip**     | S-mode 中断挂起            | 读写     |
+硬件在执行 `sret` 时自动完成：
 
-#### 2.2.3 scause 寄存器格式
+- 从 `sepc` 恢复 `pc`
+- 从 `sstatus` 恢复用户模式状态
+- 将特权模式设置为用户模式
 
-```
-63        62-0
-┌─┬───────────┐
-│I│ Exception │
-│ │   Code    │
-└─┴───────────┘
+### 2.2 进程数据结构
 
-I=1: 中断
-I=0: 异常
+#### 2.2.1 进程控制块 (proc_t)
 
-常用中断代码:
-  1: S-mode 软件中断 (M-mode 时钟中断转发)
-  5: S-mode 时钟中断
-  9: S-mode 外设中断
-
-常用异常代码:
-  0: 指令地址不对齐
-  2: 非法指令
-  8: U-mode 系统调用 (ecall)
- 12: 指令页错误
- 13: 加载页错误
- 15: 存储页错误
+```c
+typedef struct proc {
+    int pid;                // 进程标识符
+    pgtbl_t pgtbl;          // 用户态页表
+    uint64 heap_top;        // 用户堆顶（字节为单位）
+    uint64 ustack_pages;    // 用户栈占用的页面数量
+    trapframe_t* tf;        // Trapframe（用户态/内核态切换时的寄存器保存区）
+    uint64 kstack;          // 内核栈的虚拟地址
+    context_t ctx;          // 内核态进程上下文
+} proc_t;
 ```
 
-### 2.3 中断处理硬件
+#### 2.2.2 Trapframe 结构
 
-#### 2.3.1 CLINT (Core Local Interruptor)
+Trapframe 用于在用户态和内核态切换时保存寄存器：
 
-- **地址**: 0x2000000
-- **功能**: 提供定时器中断和核间软件中断
-- **关键寄存器**:
-  - `CLINT_MTIME`: 当前时间 (64位计数器)
-  - `CLINT_MTIMECMP(hartid)`: 时钟比较值
+```c
+typedef struct trapframe {
+    // 内核信息
+    uint64 kernel_satp;     // 内核页表
+    uint64 kernel_sp;       // 内核栈指针
+    uint64 kernel_trap;     // trap 处理函数地址
+    uint64 kernel_hartid;   // CPU ID
+  
+    // 用户态切换信息
+    uint64 epc;             // 用户程序计数器
+  
+    // 通用寄存器（31个，x0 固定为0）
+    uint64 ra;
+    uint64 sp;
+    uint64 gp;
+    uint64 tp;
+    uint64 t0, t1, t2;
+    uint64 s0, s1;
+    uint64 a0, a1, a2, a3, a4, a5, a6, a7;
+    uint64 s2, s3, s4, s5, s6, s7, s8, s9, s10, s11;
+    uint64 t3, t4, t5, t6;
+} trapframe_t;
+```
 
-#### 2.3.2 PLIC (Platform-Level Interrupt Controller)
+#### 2.2.3 Context 结构
 
-- **地址**: 0x0c000000
-- **功能**: 管理外部设备中断
-- **特性**:
-  - 支持中断优先级
-  - 支持多核中断分发
-  - Claim/Complete 机制防止中断丢失
+Context 用于进程间的上下文切换：
 
-#### 2.3.3 UART (串口)
+```c
+typedef struct context {
+    uint64 ra;  // 返回地址
+    uint64 sp;  // 栈指针
+  
+    // 被调用者保存寄存器
+    uint64 s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11;
+} context_t;
+```
 
-- **地址**: 0x10000000
-- **IRQ**: 10
-- **功能**: 串口输入输出，支持中断模式
+**Context 和 Trapframe 的区别**:
+
+- **Context**: 用于同一特权级内的进程切换（内核态进程之间）
+- **Trapframe**: 用于不同特权级之间的切换（用户态 ↔ 内核态）
+
+### 2.3 用户地址空间布局
+
+```
+高地址
+┌─────────────────┐
+│   TRAMPOLINE    │  最高页，跳板代码（用户态和内核态共享）
+├─────────────────┤
+│   TRAPFRAME     │  Trapframe 页（用户态和内核态共享）
+├─────────────────┤
+│   User Stack    │  用户栈（向下增长）
+│                 │
+├─────────────────┤  heap_top
+│   Heap          │  堆（向上增长）
+│                 │
+├─────────────────┤  PGSIZE (0x1000)
+│   Code + Data   │  代码和数据段
+├─────────────────┤  0x0
+│   Empty         │  最低 4KB 不映射（捕获空指针）
+└─────────────────┘
+低地址
+```
+
+### 2.4 Trampoline 机制
+
+Trampoline（跳板）页是一个同时映射在用户页表和内核页表中的特殊页面：
+
+- **位置**: 虚拟地址空间的最高页
+- **权限**: 只读可执行（不设置 `PTE_U`）
+- **作用**:
+  1. 提供特权级切换时的过渡代码
+  2. 允许在切换页表前后使用相同的虚拟地址
+  3. 保存/恢复用户态寄存器
 
 ---
 
 ## 三、实验内容
 
-### 3.1 实现的文件和函数
+### 3.1 内存布局配置
 
-#### 3.1.1 kernel/dev/timer.c - 时钟管理
+#### 3.1.1 include/memlayout.h - 地址空间定义
 
-##### `timer_init()` - M-mode 时钟初始化
-
-**功能**: 在 M-mode 下初始化时钟中断
-
-**实现代码**:
+**新增定义**:
 
 ```c
-void timer_init()
+// 用户地址空间最大值（Sv39 限制）
+#define MAXVA (1L << (9 + 9 + 9 + 12 - 1))
+
+// Trampoline 页映射到最高地址
+#define TRAMPOLINE (MAXVA - PGSIZE)
+
+// Trapframe 页紧邻 Trampoline 下方
+#define TRAPFRAME (TRAMPOLINE - PGSIZE)
+
+// 内核栈虚拟地址计算宏
+// 每个进程的内核栈占 2 页（1 页栈 + 1 页 guard page）
+#define KSTACK(p) (TRAPFRAME - ((p)+1)* 2*PGSIZE)
+```
+
+**设计要点**:
+
+- `MAXVA` 基于 Sv39 的 39 位虚拟地址计算
+- `TRAMPOLINE` 和 `TRAPFRAME` 固定在高地址，便于用户和内核共享
+- `KSTACK` 为每个进程分配独立的内核栈空间
+
+#### 3.1.2 kernel/kernel.ld - 链接脚本修改
+
+**修改内容**:
+
+```ld
+.text : {
+    *(.text .text.*)
+    . = ALIGN(0x1000);
+    _trampoline = .;
+    *(trampsec)
+    . = ALIGN(0x1000);
+    ASSERT(. - _trampoline == 0x1000, "error: trampoline larger than one page");
+    PROVIDE(etext = .);
+}
+```
+
+**设计要点**:
+
+- 将 trampoline section 单独对齐到页边界
+- 确保 trampoline 代码恰好占用一页（4096 字节）
+- 导出 `_trampoline` 符号供内核使用
+
+### 3.2 内核虚拟内存映射扩展
+
+#### 3.2.1 kernel/mem/vmem.c - kvm_init() 修改
+
+**新增映射**:
+
+```c
+void kvm_init()
 {
-    // 获取当前CPU的hartid
-    int hartid = r_mhartid();
+    // ... 原有的设备和内核段映射 ...
+  
+    // 映射 trampoline 页（用于用户态和内核态切换）
+    extern char trampoline[];  // defined in trampoline.S
+    vm_mappages(kernel_pgtbl, TRAMPOLINE, (uint64)trampoline, PGSIZE, PTE_R | PTE_X);
 
-    // 设置第一次时钟中断的时间
-    *(uint64*)CLINT_MTIMECMP(hartid) = *(uint64*)CLINT_MTIME + INTERVAL;
-
-    // 准备timer_vector需要的信息
-    uint64 *scratch = &mscratch[hartid][0];
-    scratch[3] = CLINT_MTIMECMP(hartid);
-    scratch[4] = INTERVAL;
-    w_mscratch((uint64)scratch);
-
-    // 设置M-mode trap处理函数为timer_vector
-    w_mtvec((uint64)timer_vector);
-
-    // 使能M-mode中断和时钟中断
-    w_mstatus(r_mstatus() | MSTATUS_MIE);
-    w_mie(r_mie() | MIE_MTIE);
+    // 为进程 0 分配并映射内核栈
+    char *pa = pmem_alloc(true);
+    if(pa == 0)
+        panic("kvm_init: kstack alloc failed");
+    uint64 va = KSTACK(0);
+    vm_mappages(kernel_pgtbl, va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
 }
 ```
 
 **实现要点**:
 
-- 设置 `CLINT_MTIMECMP` 为当前时间 + 间隔
-- 配置 mscratch 数组供 timer_vector 使用
-- 设置 mtvec 指向 timer_vector
-- 使能 M-mode 时钟中断
+- Trampoline 映射为只读可执行，不设置 `PTE_U`（用户不可直接访问）
+- 为第一个进程预分配内核栈并映射到固定虚拟地址
+- 使用 `pmem_alloc(true)` 分配内核页面
 
-##### `timer_create()` - 创建系统时钟
+### 3.3 进程管理实现
 
-**功能**: 初始化 S-mode 系统时钟
+#### 3.3.1 kernel/proc/cpu.c - myproc()
+
+**功能**: 获取当前 CPU 上运行的进程
 
 **实现代码**:
 
 ```c
-void timer_create()
+proc_t* myproc()
 {
-    sys_timer.ticks = 0;
-    initlock(&sys_timer.lk, "timer");
+    push_off();  // 关中断，防止调度
+    cpu_t* c = mycpu();
+    proc_t* p = c->proc;
+    pop_off();   // 恢复中断状态
+    return p;
 }
 ```
 
-##### `timer_update()` - 更新时钟
+**实现要点**:
 
-**功能**: 线程安全地增加系统滴答计数
+- 使用 `push_off/pop_off` 保护临界区
+- 通过 `mycpu()` 获取当前 CPU 结构
+- 返回 CPU 上正在运行的进程指针
+
+#### 3.3.2 kernel/proc/proc.c - proc_pgtbl_init()
+
+**功能**: 创建并初始化用户进程页表
 
 **实现代码**:
 
 ```c
-void timer_update()
+pgtbl_t proc_pgtbl_init(uint64 trapframe)
 {
-    acquire(&sys_timer.lk);
-    sys_timer.ticks++;
-    release(&sys_timer.lk);
+    pgtbl_t pgtbl;
+    uint64 page;
+  
+    // 分配一个空的页表（内核空间）
+    page = (uint64)pmem_alloc(true);
+    if(page == 0) {
+        return 0;
+    }
+    pgtbl = (pgtbl_t)page;
+    memset((void*)pgtbl, 0, PGSIZE);
+  
+    // 映射 trampoline 页（用户态和内核态共享的跳板代码）
+    // 不设置 PTE_U，用户不可直接访问
+    vm_mappages(pgtbl, TRAMPOLINE, (uint64)trampoline, PGSIZE, PTE_R | PTE_X);
+  
+    // 映射 trapframe 页（用于保存用户态寄存器）
+    vm_mappages(pgtbl, TRAPFRAME, trapframe, PGSIZE, PTE_R | PTE_W);
+  
+    return pgtbl;
 }
 ```
 
-##### `timer_get_ticks()` - 获取时钟滴答数
+**实现要点**:
 
-**功能**: 线程安全地读取当前 ticks
+- 分配新的顶层页表页
+- 将 trampoline 映射到用户地址空间最高处
+- 将 trapframe 映射到 trampoline 下方一页
+- Trampoline 不设置 `PTE_U`，防止用户直接访问
+
+#### 3.3.3 kernel/proc/proc.c - proc_make_first()
+
+**功能**: 创建并启动第一个用户态进程 proczero
 
 **实现代码**:
 
 ```c
-uint64 timer_get_ticks()
+void proc_make_first()
 {
-    uint64 ticks;
-    acquire(&sys_timer.lk);
-    ticks = sys_timer.ticks;
-    release(&sys_timer.lk);
-    return ticks;
+    uint64 page;
+  
+    printf("[proc_make_first] Starting...\n");
+  
+    // 显式初始化 proczero 结构为 0（重要！）
+    memset(&proczero, 0, sizeof(proc_t));
+  
+    // 1. 设置 PID
+    proczero.pid = 0;
+  
+    // 2. 分配 trapframe 物理页（内核空间）
+    page = (uint64)pmem_alloc(true);
+    assert(page != 0, "proc_make_first: trapframe alloc failed\n");
+    proczero.tf = (trapframe_t*)page;
+    memset(proczero.tf, 0, PGSIZE);
+  
+    // 3. 初始化用户页表（包括 trampoline 和 trapframe 的映射）
+    proczero.pgtbl = proc_pgtbl_init((uint64)proczero.tf);
+    assert(proczero.pgtbl != 0, "proc_make_first: pgtbl init failed\n");
+  
+    // 4. 分配并映射代码页（从地址 PGSIZE 开始，避开最低的 4096 字节）
+    assert(initcode_len <= PGSIZE, "proc_make_first: initcode too big\n");
+    page = (uint64)pmem_alloc(false);  // 用户空间
+    assert(page != 0, "proc_make_first: code page alloc failed\n");
+    memset((void*)page, 0, PGSIZE);
+    // 将 initcode 复制到这个页面
+    memmove((void*)page, (void*)initcode, initcode_len);
+    // 映射代码页，从虚拟地址 PGSIZE 开始
+    vm_mappages(proczero.pgtbl, PGSIZE, page, PGSIZE, PTE_R | PTE_W | PTE_X | PTE_U);
+  
+    // 5. 设置 heap_top（代码页之后）
+    proczero.heap_top = 2 * PGSIZE;
+  
+    // 6. 分配并映射用户栈（用户空间）
+    page = (uint64)pmem_alloc(false);
+    assert(page != 0, "proc_make_first: ustack alloc failed\n");
+    memset((void*)page, 0, PGSIZE);
+    // 用户栈在 heap_top 之上
+    vm_mappages(proczero.pgtbl, proczero.heap_top, page, PGSIZE, PTE_R | PTE_W | PTE_U);
+    proczero.ustack_pages = 1;
+  
+    // 7. 设置 trapframe 字段（用户态信息）
+    proczero.tf->epc = PGSIZE;  // 用户程序从 PGSIZE 处开始执行
+    proczero.tf->sp = proczero.heap_top + PGSIZE;  // 用户栈指针指向栈顶（向下增长）
+  
+    // 8. 分配内核栈
+    proczero.kstack = (uint64)pmem_alloc(true);
+    assert(proczero.kstack != 0, "proc_make_first: kstack alloc failed\n");
+    memset((void*)proczero.kstack, 0, PGSIZE);
+  
+    // 9. 设置 trapframe 字段（内核态信息）
+    proczero.tf->kernel_satp = r_satp();  // 内核页表
+    proczero.tf->kernel_sp = proczero.kstack + PGSIZE;  // 内核栈顶
+    proczero.tf->kernel_trap = (uint64)trap_user_handler;  // 用户态 trap 处理函数
+    proczero.tf->kernel_hartid = r_tp();  // 当前 CPU ID
+  
+    // 10. 设置进程上下文，准备第一次调度
+    memset(&proczero.ctx, 0, sizeof(context_t));
+    proczero.ctx.ra = (uint64)trap_user_return;  // 返回到用户态
+    proczero.ctx.sp = proczero.kstack + PGSIZE;  // 内核栈顶
+  
+    // 11. 设置当前 CPU 的进程指针
+    printf("DEBUG 1: Before mycpu()->proc assignment\n");
+    cpu_t* cpu = mycpu();
+    printf("DEBUG 2: mycpu() returned, cpu=%p\n", cpu);
+    cpu->proc = &proczero;
+    printf("DEBUG 3: After assignment\n");
+  
+    // 12. 上下文切换：从内核调度器切换到第一个用户进程
+    printf("Switching to proczero (first user process)...\n");
+    printf("  ctx.ra = 0x%lx, ctx.sp = 0x%lx\n", proczero.ctx.ra, proczero.ctx.sp);
+    printf("  About to call swtch()...\n");
+    swtch(&(cpu->ctx), &(proczero.ctx));
+  
+    // 这里不应该被执行到，因为 swtch() 切换到了 trap_user_return
+    printf("ERROR: Returned from swtch()! This should not happen.\n");
+    while(1);
 }
 ```
 
----
+**实现要点**:
 
-#### 3.1.2 kernel/trap/trap_kernel.c - 内核态中断处理
+1. **全局数据初始化**: 使用 `memset` 显式初始化 proczero 为 0（关键！）
+2. **内存分配顺序**:
+   - Trapframe（内核页）
+   - 用户页表
+   - 代码页（用户页）
+   - 用户栈（用户页）
+   - 内核栈（内核页）
+3. **地址空间布局**:
+   - 地址 0x0: 空（不映射，用于捕获空指针）
+   - 地址 PGSIZE (0x1000): 代码页
+   - 地址 2*PGSIZE: heap_top，用户栈起始
+4. **上下文设置**:
+   - `ctx.ra`: 指向 `trap_user_return`，swtch 返回后执行它
+   - `ctx.sp`: 内核栈顶
+5. **Trapframe 初始化**:
+   - 用户态: epc, sp
+   - 内核态: kernel_satp, kernel_sp, kernel_trap, kernel_hartid
 
-##### `trap_kernel_init()` - 初始化全局 trap 资源
+### 3.4 用户态 Trap 处理
 
-**功能**: 初始化内核 trap 系统的全局资源
+#### 3.4.1 kernel/trap/trap_user.c - trap_user_handler()
 
-**实现代码**:
-
-```c
-void trap_kernel_init()
-{
-    timer_create();
-}
-```
-
-##### `trap_kernel_inithart()` - 每个 CPU 核心的 trap 初始化
-
-**功能**: 为每个 CPU 核心设置 trap 处理
-
-**实现代码**:
-
-```c
-void trap_kernel_inithart()
-{
-    w_stvec((uint64)kernel_vector);
-}
-```
-
-##### `trap_kernel_handler()` - 核心中断/异常处理逻辑
-
-**功能**: 分发和处理所有内核态的中断和异常
+**功能**: 处理来自用户态的 trap（中断、异常、系统调用）
 
 **实现代码**:
 
 ```c
-void trap_kernel_handler()
+void trap_user_handler()
 {
-    uint64 sepc = r_sepc();
-    uint64 sstatus = r_sstatus();
-    uint64 scause = r_scause();
-    uint64 stval = r_stval();
+    uint64 sepc = r_sepc();          // 记录了发生异常时的pc值
+    uint64 sstatus = r_sstatus();    // 与特权模式和中断相关的状态信息
+    uint64 scause = r_scause();      // 引发trap的原因
+    uint64 stval = r_stval();        // 发生trap时保存的附加信息
+    proc_t* p = myproc();
 
-    // 安全性检查
-    assert(sstatus & SSTATUS_SPP, "trap_kernel_handler: not from s-mode");
-    assert(intr_get() == 0, "trap_kernel_handler: interrupt enabled");
+    // 确认trap来自U-mode
+    assert((sstatus & SSTATUS_SPP) == 0, "trap_user_handler: not from u-mode");
 
-    int trap_id = scause & 0xf;
-
-    if (scause & (1ULL << 63)) {
-        // 中断处理
-        switch (trap_id) {
-            case 1:  // S-mode 软件中断
-                timer_interrupt_handler();
-                break;
-            case 5:  // S-mode 时钟中断
-                printk("S-mode timer interrupt\n");
-                break;
-            case 9:  // S-mode 外设中断
-                external_interrupt_handler();
-                break;
-            default:
-                printk("Unknown interrupt: %s\n", interrupt_info[trap_id]);
-                break;
-        }
+    // 判断是中断还是异常
+    if(scause & (1UL << 63)) {
+        // 中断
+        uint64 cause = scause & 0xFF;
+        printf("[User Trap] Interrupt: %s\n", interrupt_info[cause]);
     } else {
-        // 异常处理
-        printk("Exception in kernel at sepc=0x%lx: %s\n", 
-               sepc, exception_info[trap_id]);
-        printk("  stval = 0x%lx\n", stval);
-        panic("Unhandled exception in kernel mode");
+        // 异常
+        uint64 cause = scause & 0xFF;
+    
+        // 处理系统调用 (ecall from U-mode)
+        if(cause == 8) {
+            // 系统调用
+            printf("[User Trap] System call from user mode\n");
+            // sepc 指向 ecall 指令，需要跳过它（4字节）
+            p->tf->epc += 4;
+        } else {
+            // 其他异常
+            printf("[User Trap] Exception: %s\n", exception_info[cause]);
+            printf("  sepc = 0x%lx, stval = 0x%lx\n", sepc, stval);
+        }
     }
+  
+    // 返回用户态
+    trap_user_return();
 }
 ```
 
 **实现要点**:
 
-- 读取所有关键 CSR 寄存器
-- 进行安全性检查
-- 根据 scause 最高位判断中断/异常
-- 分发到对应的处理函数
+- 检查 `sstatus.SPP` 确保来自用户态
+- 根据 `scause` 最高位判断中断/异常
+- 系统调用需要将 `epc + 4` 跳过 ecall 指令
+- 处理完毕后调用 `trap_user_return()` 返回用户态
 
-##### `timer_interrupt_handler()` - 时钟中断处理
+#### 3.4.2 kernel/trap/trap_user.c - trap_user_return()
 
-**功能**: 处理由 M-mode 转发的时钟中断
+**功能**: 从内核态返回用户态
 
 **实现代码**:
 
 ```c
-void timer_interrupt_handler()
+void trap_user_return()
 {
-    // 清除S-mode软件中断挂起位
-    w_sip(r_sip() & ~2);
-
-    // 更新系统时钟
-    timer_update();
-
-    // 打印时钟中断信息
-    printk("Timer interrupt: ticks = %d\n", timer_get_ticks());
+    proc_t* p = myproc();
+  
+    printf("[trap_user_return] Returning to user mode, epc=0x%lx, sp=0x%lx\n", 
+           p->tf->epc, p->tf->sp);
+  
+    // 关中断，避免在切换页表时被打断
+    intr_off();
+  
+    // 设置 stvec 指向 trampoline 中的 user_vector
+    // TRAMPOLINE 是用户页表中 trampoline 代码的虚拟地址
+    w_stvec(TRAMPOLINE + ((uint64)user_vector - (uint64)trampoline));
+  
+    // 设置 trapframe 的值，准备返回用户态
+    p->tf->kernel_satp = r_satp();              // 保存内核页表
+    p->tf->kernel_sp = p->kstack + PGSIZE;      // 保存内核栈指针
+    p->tf->kernel_trap = (uint64)trap_user_handler;  // 保存trap处理函数
+    p->tf->kernel_hartid = r_tp();              // 保存CPU ID
+  
+    // 切换到用户页表
+    uint64 satp = MAKE_SATP(p->pgtbl);
+  
+    // 调用 trampoline.S 中的 user_return
+    // 它会恢复用户态寄存器并执行 sret 返回用户态
+    // 参数：用户页表的 SATP 值，trapframe 的虚拟地址
+    ((void (*)(uint64, uint64))((uint64)user_return - (uint64)trampoline + TRAMPOLINE))
+        (satp, TRAPFRAME);
 }
 ```
 
 **实现要点**:
 
-- 清除 SIP.SSIP 位
-- 调用 timer_update() 增加 ticks
-- 打印调试信息
+- 关中断保护页表切换过程
+- 设置 `stvec` 指向用户页表中的 trampoline
+- 更新 trapframe 中的内核信息（下次 trap 时使用）
+- 计算 user_return 在用户页表中的地址并调用
+- 传递用户页表的 SATP 值和 trapframe 地址
 
-##### `external_interrupt_handler()` - 外设中断处理
+### 3.5 用户程序编译
 
-**功能**: 处理 PLIC 管理的外部设备中断
+#### 3.5.1 user/initcode.c - 首个用户程序
 
-**实现代码**:
-
-```c
-void external_interrupt_handler()
-{
-    int irq = plic_claim();
-
-    if (irq == UART_IRQ) {
-        uart_intr();
-    } else if (irq) {
-        printk("Unexpected external interrupt irq=%d\n", irq);
-    }
-
-    if (irq) {
-        plic_complete(irq);
-    }
-}
-```
-
-**实现要点**:
-
-- 调用 plic_claim() 获取中断号
-- 根据 IRQ 分发到具体设备驱动
-- 调用 plic_complete() 通知 PLIC 完成
-
----
-
-#### 3.1.3 kernel/trap/trap.S - 汇编中断入口
-
-##### kernel_vector - S-mode 中断向量
-
-**功能**: 保存/恢复上下文，调用 C 语言处理函数
-
-**实现代码** (部分):
-
-```assembly
-kernel_vector:
-    # 分配栈空间
-    addi sp, sp, -256
-
-    # 保存所有通用寄存器
-    sd ra, 0(sp)
-    sd sp, 8(sp)
-    sd gp, 16(sp)
-    # ... 保存 x4-x31
-
-    # 调用 C 处理函数
-    call trap_kernel_handler
-
-    # 恢复所有寄存器
-    ld ra, 0(sp)
-    # ... 恢复其他寄存器
-
-    # 恢复栈指针
-    addi sp, sp, 256
-
-    # 返回
-    sret
-```
-
-##### timer_vector - M-mode 时钟中断向量
-
-**功能**: 处理 M-mode 时钟中断，转发到 S-mode
-
-**实现代码** (部分):
-
-```assembly
-timer_vector:
-    # 暂存寄存器到 mscratch
-    csrrw a0, mscratch, a0
-    sd a1, 0(a0)
-    sd a2, 8(a0)
-    sd a3, 16(a0)
-
-    # 更新 CLINT_MTIMECMP += INTERVAL
-    ld a1, 24(a0)     # CLINT_MTIMECMP 地址
-    ld a2, 32(a0)     # INTERVAL
-    ld a3, 0(a1)
-    add a3, a3, a2
-    sd a3, 0(a1)
-
-    # 触发 S-mode 软件中断
-    li a1, 2
-    csrw sip, a1
-
-    # 恢复寄存器
-    ld a3, 16(a0)
-    ld a2, 8(a0)
-    ld a1, 0(a0)
-    csrrw a0, mscratch, a0
-
-    mret
-```
-
----
-
-### 3.2 函数调用关系
-
-#### 3.2.1 启动阶段函数调用
-
-**kernel/boot/start.c** (M-mode):
+**源代码**:
 
 ```c
+#include "sys.h"
+
+// start() is the entry point for the first user process
+// The linker script will set this as the entry point at address 0x1000
 void start()
 {
-    // ... 配置特权级和内存保护
-  
-    // 初始化时钟中断
-    timer_init();
-  
-    // 切换到 S-mode
-    mret;
+    syscall(SYS_print);
+    syscall(SYS_print);
+    while(1);
 }
 ```
 
-**kernel/boot/main.c** (S-mode):
+**功能**:
+
+- 执行两次系统调用（SYS_print）
+- 进入死循环
+
+#### 3.5.2 user/Makefile - 编译规则
+
+```makefile
+init: initcode.c
+	$(CC) $(CFLAGS) -I . -march=rv64g -nostdinc -c initcode.c -o initcode.o
+	$(LD) $(LDFLAGS) -N -e start -Ttext 0 -o initcode.out initcode.o
+	$(OBJCOPY) -S -O binary initcode.out initcode
+	xxd -i initcode > ../include/proc/initcode.h
+	rm -f initcode initcode.d initcode.o initcode.out
+```
+
+**编译流程**:
+
+1. 编译 `initcode.c` 为目标文件
+2. 链接到地址 0，入口点为 `start`
+3. 提取二进制代码
+4. 使用 `xxd -i` 转换为 C 数组
+5. 生成 `initcode.h`
+
+**生成的 initcode.h**:
+
+```c
+unsigned char initcode[] = {
+  0x13, 0x01, 0x01, 0xff, 0x23, 0x34, 0x81, 0x00, 0x13, 0x04, 0x01, 0x01,
+  0x93, 0x08, 0x00, 0x00, 0x73, 0x00, 0x00, 0x00, 0x73, 0x00, 0x00, 0x00,
+  0x6f, 0x00, 0x00, 0x00
+};
+unsigned int initcode_len = 28;
+```
+
+### 3.6 启动流程更新
+
+#### 3.6.1 kernel/boot/main.c - 修改
 
 ```c
 int main()
@@ -426,148 +564,317 @@ int main()
     int cpuid = r_tp();
 
     if(cpuid == 0) {
+        // CPU 0: 主核心初始化
         print_init();
-  
-        // 初始化设备和中断系统
-        uart_init();
-        plic_init();
+        printf("\n=== WHU OS Lab 4: First User Process ===\n");
+        printf("Initializing system...\n\n");
+
+        // 初始化物理内存管理器
+        pmem_init();
+        printf("Physical memory initialized\n");
+    
+        // 初始化内核虚拟内存（页表）
+        kvm_init();
+        printf("Kernel virtual memory initialized\n");
+    
+        printf("About to initialize hart VM...\n");
+        // 初始化当前 hart 的虚拟内存
+        kvm_inithart();
+        printf("Kernel VM enabled for hart %d\n", cpuid);
+    
+        // 初始化 CPU 结构
+        cpu_init();
+        printf("CPU structures initialized\n");
+    
+        // 初始化内核trap系统
         trap_kernel_init();
         trap_kernel_inithart();
-        plic_inithart();
-  
-        // 使能中断
-        intr_on();
-  
-        started = 1;
+        printf("Trap system initialized\n");
+    
+        printf("\nSystem initialization complete.\n");
+        printf("Creating first user process (proczero)...\n\n");
+    
+        __sync_synchronize();
+        started = 1;  // 允许其他CPU继续启动
+    
+        // 创建并切换到第一个用户进程
+        // 注意：这个函数不会返回，它会直接切换到用户态
+        proc_make_first();
+
     } else {
-        while(started == 0);
-  
         // 其他CPU核心初始化
+        while(started == 0);
+        __sync_synchronize();
+    
+        // 其他CPU核心初始化虚拟内存和trap
+        kvm_inithart();
         trap_kernel_inithart();
-        plic_inithart();
-        intr_on();
+    
+        printf("CPU %d is ready!\n", cpuid);
     }
 
-    while (1);
+    // 其他CPU的主循环
+    while (1) {
+        // 空循环，等待调度
+    }
 }
 ```
 
----
+**执行流程**:
 
-## 四、中断处理流程
-
-### 4.1 时钟中断完整流程
-
-```
-1. CLINT 时钟到期 (CLINT_MTIME >= CLINT_MTIMECMP)
-    ↓
-2. 触发 M-mode 时钟中断
-    ↓
-3. CPU 跳转到 mtvec (timer_vector)
-    ↓
-4. [trap.S] timer_vector:
-    ├─ 保存寄存器 a0-a3 到 mscratch
-    ├─ 更新 CLINT_MTIMECMP += INTERVAL
-    ├─ 设置 SIP.SSIP (触发 S-mode 软件中断)
-    └─ mret 返回
-    ↓
-5. 触发 S-mode 软件中断
-    ↓
-6. CPU 跳转到 stvec (kernel_vector)
-    ↓
-7. [trap.S] kernel_vector:
-    ├─ 保存所有寄存器到栈
-    └─ call trap_kernel_handler()
-        ↓
-8. [trap_kernel.c] trap_kernel_handler():
-    ├─ 读取 scause = 0x8000000000000001
-    └─ 调用 timer_interrupt_handler()
-        ├─ 清除 SIP.SSIP
-        ├─ timer_update() (ticks++)
-        └─ printk("Timer interrupt: ticks = %d")
-        ↓
-9. 返回到 kernel_vector
-    ├─ 恢复所有寄存器
-    └─ sret 返回到被中断的代码
-```
-
-### 4.2 UART 中断完整流程
-
-```
-1. UART 接收到数据
-    ↓
-2. UART 硬件产生中断请求
-    ↓
-3. PLIC 接收中断请求并设置挂起位
-    ↓
-4. 触发 S-mode 外设中断
-    ↓
-5. CPU 跳转到 stvec (kernel_vector)
-    ↓
-6. [trap.S] kernel_vector:
-    ├─ 保存所有寄存器到栈
-    └─ call trap_kernel_handler()
-        ↓
-7. [trap_kernel.c] trap_kernel_handler():
-    ├─ 读取 scause = 0x8000000000000009
-    └─ 调用 external_interrupt_handler()
-        ├─ plic_claim() → 获取 IRQ = 10 (UART)
-        ├─ uart_intr()
-        │   ├─ 读取 UART 数据
-        │   └─ uart_putc_sync() 回显
-        └─ plic_complete(10)
-        ↓
-8. 返回到 kernel_vector
-    ├─ 恢复所有寄存器
-    └─ sret 返回到被中断的代码
-```
+1. CPU 0 完成所有系统初始化
+2. CPU 0 调用 `proc_make_first()` 创建并切换到第一个用户进程
+3. 其他 CPU 等待初始化完成后进入空循环
+4. CPU 0 通过 `swtch()` 切换到 proczero，不再返回 main
 
 ---
 
-## 五、关键数据结构
+## 四、关键技术点
 
-### 5.1 timer_t 结构
+### 4.1 全局数据初始化为 0
 
-```c
-typedef struct timer {
-    uint64 ticks;      // 时钟滴答计数
-    spinlock_t lk;     // 保护 ticks 的自旋锁
-} timer_t;
-```
+**问题**: 在 C 语言中，全局变量和静态变量默认初始化为 0，但在某些编译器优化下可能不保证。
 
-**设计说明**:
-
-- 使用自旋锁保证多核环境下的线程安全
-- ticks 记录系统启动以来的时钟中断次数
-
-### 5.2 mscratch 数组
+**解决方案**:
 
 ```c
-static uint64 mscratch[NCPU][5];
+memset(&proczero, 0, sizeof(proc_t));
 ```
 
-**用途**:
+**重要性**:
 
-- `[hartid][0..2]`: timer_vector 临时保存 a1, a2, a3
-- `[hartid][3]`: CLINT_MTIMECMP(hartid) 地址
-- `[hartid][4]`: INTERVAL 值
+- 避免未初始化字段导致的不可预测行为
+- 特别是指针字段，必须确保初始为 NULL
+
+### 4.2 位置无关代码
+
+**问题**: initcode 被链接到地址 0，但加载到地址 PGSIZE (0x1000)。
+
+**解决方案**:
+
+- 使用 `-mcmodel=medany` 编译选项
+- RISC-V 的跳转指令（如 `j`）是 PC 相对的，自动适应加载地址
+- 避免使用绝对地址
+
+**验证**:
+
+```bash
+riscv64-linux-gnu-objdump -d initcode.out
+```
+
+### 4.3 页表切换的安全性
+
+**问题**: 切换页表时，如果 PC 指向的地址在新页表中无效，会导致崩溃。
+
+**解决方案**: Trampoline 机制
+
+- Trampoline 页同时映射在用户页表和内核页表的相同虚拟地址
+- 切换页表时，PC 位于 trampoline 中，新旧页表都有效
+- 切换完成后，再跳转到目标代码
+
+### 4.4 上下文切换流程
+
+**proc_make_first() → swtch() → trap_user_return() → user_return() → 用户态**
+
+1. `proc_make_first()` 设置 proczero 的 context
+
+   - `ctx.ra = trap_user_return`
+   - `ctx.sp = kstack + PGSIZE`
+2. `swtch(&cpu->ctx, &proczero.ctx)` 切换上下文
+
+   - 保存当前 CPU 的 context
+   - 恢复 proczero 的 context
+   - `ret` 指令跳转到 `ctx.ra`（即 trap_user_return）
+3. `trap_user_return()` 准备返回用户态
+
+   - 设置 trapframe
+   - 调用 `user_return(satp, trapframe)`
+4. `user_return()` （汇编）切换到用户态
+
+   - 切换页表到用户页表
+   - 从 trapframe 恢复所有寄存器
+   - `sret` 返回用户态
+
+---
+
+## 五、遇到的问题及解决方案
+
+### 5.1 链接错误：undefined reference to interrupt_info 和 exception_info
+
+**问题描述**:
+编译时出现链接错误：
+
+```
+trap_user.c:(.text+0x...): undefined reference to `exception_info'
+trap_user.c:(.text+0x...): undefined reference to `interrupt_info'
+```
+
+**原因分析**:
+
+- `trap_user.c` 中声明了 `extern char* interrupt_info[16]` 和 `extern char* exception_info[16]`
+- 但这两个数组在 `trap_kernel.c` 中被定义为 `static`，导致外部无法链接
+
+**解决方案**:
+在 `trap_kernel.c` 中移除 `static` 关键字：
+
+```c
+// 修改前
+static char* interrupt_info[16] = { ... };
+static char* exception_info[16] = { ... };
+
+// 修改后
+char* interrupt_info[16] = { ... };
+char* exception_info[16] = { ... };
+```
+
+### 5.2 Makefile 未正确重新链接
+
+**问题描述**:
+修改源文件后编译，但运行时仍然使用旧代码，调试输出没有出现。
+
+**原因分析**:
+
+- `proc.o` 被重新编译（时间戳更新）
+- 但 `kernel-qemu` 和 `kernel-qemu.elf` 没有被重新链接
+- Makefile 依赖关系配置不完整
+
+**解决方案**:
+手动删除最终产物强制重新链接：
+
+```bash
+rm -f kernel-qemu kernel-qemu.elf && make
+```
+
+**长期方案**:
+修改 Makefile，确保 .o 文件更新时自动重新链接。
+
+### 5.3 系统在 kvm_inithart() 后卡住
+
+**问题描述**:
+系统输出 "Kernel virtual memory initialized" 后，下一行 "About to initialize hart VM..." 没有出现，系统卡住。
+
+**原因分析**:
+
+- 实际上是 Makefile 问题导致的（见 5.2）
+- 新增的 printf 没有被编译进内核
+
+**调试过程**:
+
+1. 检查文件时间戳：`ls -l kernel/boot/main.o kernel-qemu`
+2. 发现 main.o 更新但 kernel-qemu 未更新
+3. 强制重新链接后问题解决
+
+**教训**:
+
+- 调试时要检查二进制文件是否真正更新
+- 必要时使用 `make clean && make` 完全重新编译
+
+### 5.4 printf 格式化输出错误
+
+**问题描述**:
+输出显示 `DEBUG: ra=0x%lx, sp=0x%lx`，格式符未被替换。
+
+**原因分析**:
+代码写成了：
+
+```c
+uint64 ra = proczero.ctx.ra;
+uint64 sp = proczero.ctx.sp;
+printf("DEBUG: ra=0x%lx, sp=0x%lx\n", ra, sp);
+```
+
+但由于编译器优化或其他原因，参数传递出现问题。
+
+**解决方案**:
+直接在 printf 中使用结构体成员：
+
+```c
+printf("  ctx.ra = 0x%lx, ctx.sp = 0x%lx\n", proczero.ctx.ra, proczero.ctx.sp);
+```
+
+### 5.5 kvm_init() 中 trampoline 映射的时机问题
+
+**问题描述**:
+最初在 `proc_make_first()` 中分配内核栈，但根据 lab4.md 要求，应该在 `kvm_init()` 中完成。
+
+**原因分析**:
+
+- xv6 的 `kvmmake()` 调用 `proc_mapstacks()` 为所有进程预分配内核栈
+- Lab-4 只需要为 proczero 分配一个内核栈
+- 但映射应该在内核页表初始化时完成
+
+**解决方案**:
+在 `kvm_init()` 中添加：
+
+```c
+// 为进程 0 分配并映射内核栈
+char *pa = pmem_alloc(true);
+if(pa == 0)
+    panic("kvm_init: kstack alloc failed");
+uint64 va = KSTACK(0);
+vm_mappages(kernel_pgtbl, va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
+```
+
+然后在 `proc_make_first()` 中直接使用 `KSTACK(0)` 而不是重新分配。
+
+**注意**: 当前实现仍在 `proc_make_first()` 中分配，因为简化了流程。
+
+### 5.6 initcode 编译的地址问题
+
+**问题描述**:
+initcode 使用 `-Ttext 0` 链接，但被加载到 PGSIZE (0x1000)，担心地址不匹配。
+
+**原因分析**:
+
+- RISC-V 的大部分指令是位置无关的（PC 相对）
+- `j offset` 实际是 `jal x0, offset`，是相对跳转
+- 只要代码不使用绝对地址，就可以在任意位置运行
+
+**验证**:
+反汇编检查生成的指令：
+
+```bash
+riscv64-linux-gnu-objdump -d initcode.out
+```
+
+发现所有指令都是位置无关的。
+
+**结论**:
+当前实现正确，无需修改链接地址。
+
+### 5.7 调试输出的缓冲问题
+
+**问题描述**:
+添加的多个 printf 调试语句，但只有部分显示。
+
+**原因分析**:
+
+- UART 输出可能有缓冲
+- 系统崩溃可能导致部分输出丢失
+
+**解决方案**:
+
+- 在关键位置添加调试输出
+- 每个 printf 后添加换行符 `\n` 确保刷新
+- 必要时在 printf 后调用 `uart_putc_sync()` 强制刷新
 
 ---
 
 ## 六、实验测试
 
-### 6.1 时钟中断测试
-
-**测试代码**：
+### 6.1 测试代码
 
 ```c++
 #include "riscv.h"
 #include "lib/print.h"
-#include "dev/uart.h"
-#include "dev/plic.h"
+#include "mem/pmem.h"
+#include "mem/vmem.h"
+#include "proc/cpu.h"
+#include "proc/proc.h"
 #include "trap/trap.h"
 
 volatile static int started = 0;
+
 int main()
 {
     int cpuid = r_tp();
@@ -576,129 +883,61 @@ int main()
         // CPU 0: 主核心初始化
         print_init();
 
-        printf("\n=== WHU OS Lab 3: Timer Interrupt Test ===\n");
-        printf("Testing timer interrupts only...\n\n");
+        printf("\n=== WHU OS Lab 4: First User Process ===\n");
+        printf("Initializing system...\n\n");
 
-        // 初始化trap系统（用于处理时钟中断）
-        trap_kernel_init();       // 初始化内核trap系统（包括timer_create）
-        trap_kernel_inithart();   // 初始化当前核心的trap（设置stvec）
-
+        // 初始化物理内存管理器
+        pmem_init();
+        printf("Physical memory initialized\n");
+    
+        // 初始化内核虚拟内存（页表）
+        kvm_init();
+        printf("Kernel virtual memory initialized\n");
+    
+        printf("About to initialize hart VM...\n");
+        // 初始化当前 hart 的虚拟内存
+        kvm_inithart();
+        printf("Kernel VM enabled for hart %d\n", cpuid);
+    
+        // 初始化 CPU 结构
+        cpu_init();
+        printf("CPU structures initialized\n");
+    
+        // 初始化内核trap系统
+        trap_kernel_init();
+        trap_kernel_inithart();
         printf("Trap system initialized\n");
-
-        // 使能中断
-        intr_on();
-        printf("Interrupts enabled\n\n");
-
-        printf("CPU %d is booting!\n", cpuid);
-        printf("Waiting for timer interrupts...\n");
-        printf("Timer interrupt occurs approximately every 0.1 seconds (INTERVAL=1000000)\n");
-        printf("- Each 'T' represents one timer tick\n");
-        printf("- Ticks count is displayed every 10 interrupts\n");
-        printf("- You can modify INTERVAL in include/dev/timer.h to test different speeds\n\n");
+    
+        printf("\nSystem initialization complete.\n");
+        printf("Creating first user process (proczero)...\n\n");
     
         __sync_synchronize();
         started = 1;  // 允许其他CPU继续启动
+    
+        // 创建并切换到第一个用户进程
+        // 注意：这个函数不会返回，它会直接切换到用户态
+        proc_make_first();
 
     } else {
         // 其他CPU核心初始化
         while(started == 0);
         __sync_synchronize();
     
-        // 其他CPU核心也需要初始化trap
-        trap_kernel_inithart();   // 初始化当前核心的trap
+        // 其他CPU核心初始化虚拟内存和trap
+        kvm_inithart();
+        trap_kernel_inithart();
     
-        // 使能中断
-        intr_on();
-    
-        printf("CPU %d is booting!\n", cpuid);
+        printf("CPU %d is ready!\n", cpuid);
     }
 
-    // 主循环：等待中断
+    // 其他CPU的主循环
     while (1) {
-        // 可以在这里添加其他测试代码
-        // 中断会自动被处理
+        // 空循环，等待调度
     }
 }
 
 ```
 
-**测试结果**:
+### 6.2 运行结果
 
-多核输出![1760946205872](image/doc/1760946205872.png)只让CPU0输出![1760946489691](image/doc/1760946489691.png)
-
-### 6.2 UART 中断测试
-
-**测试代码**：
-
-```c++
-#include "riscv.h"
-#include "lib/print.h"
-#include "dev/uart.h"
-#include "dev/plic.h"
-#include "trap/trap.h"
-
-volatile static int started = 0;
-int main()
-{
-    int cpuid = r_tp();
-
-    if(cpuid == 0) {
-        // CPU 0: 主核心初始化
-        print_init();
-
-        printf("\n=== WHU OS Lab 3: External Interrupt Test ===\n");
-        printf("Testing UART external interrupts...\n\n");
-
-        // 初始化中断系统（但还不使能UART中断）
-        plic_init();              // 初始化PLIC中断控制器
-        trap_kernel_init();       // 初始化内核trap系统
-        trap_kernel_inithart();   // 初始化当前核心的trap
-        plic_inithart();          // 初始化当前核心的PLIC
-
-        printf("PLIC initialized\n");
-        printf("Trap system initialized\n");
-
-        // 使能系统中断
-        intr_on();
-        printf("System interrupts enabled\n");
-
-        // 在系统中断使能后再初始化UART（避免中断堆积）
-        uart_init();              // 初始化UART串口并使能UART中断
-        printf("UART initialized\n\n");
-
-        printf("CPU %d is ready!\n", cpuid);
-        printf("=== UART External Interrupt Test ===\n");
-        printf("Please type characters to test UART interrupt.\n");
-        printf("Each character you type will trigger an external interrupt.\n");
-        printf("Press Ctrl+A then X to exit QEMU.\n\n");
-    
-        __sync_synchronize();
-        started = 1;  // 允许其他CPU继续启动
-
-    } else {
-        // 其他CPU核心初始化
-        while(started == 0);
-        __sync_synchronize();
-    
-        // 其他CPU核心也需要初始化trap和plic
-        trap_kernel_inithart();   // 初始化当前核心的trap
-        plic_inithart();          // 初始化当前核心的PLIC
-    
-        // 使能中断
-        intr_on();
-    
-        printf("CPU %d is ready!\n", cpuid);
-    }
-
-    // 主循环：等待中断
-    while (1) {
-        // 可以在这里添加其他测试代码
-        // 中断会自动被处理
-    }
-}
-
-```
-
-**测试结果**:
-
-![1760949041027](image/doc/1760949041027.png)
+![1762156357721](image/doc/1762156357721.png)

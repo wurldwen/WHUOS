@@ -27,6 +27,7 @@ int main()
         kvm_init();
         printf("Kernel virtual memory initialized\n");
         
+        printf("About to initialize hart VM...\n");
         // 初始化当前 hart 的虚拟内存
         kvm_inithart();
         printf("Kernel VM enabled for hart %d\n", cpuid);
@@ -48,7 +49,7 @@ int main()
         
         // 创建并切换到第一个用户进程
         // 注意：这个函数不会返回，它会直接切换到用户态
-        proc_make_fisrt();
+        proc_make_first();
 
     } else {
         // 其他CPU核心初始化
