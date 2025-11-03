@@ -2,6 +2,10 @@
 #define __VMEM_H__
 
 #include "common.h"
+
+// 前向声明
+typedef struct mmap_region mmap_region_t;
+
 //页表项
 typedef uint64 pte_t;
 
@@ -52,7 +56,7 @@ void   kvm_inithart();
 
 void   uvm_show_mmaplist(mmap_region_t* mmap);
 
-void   uvm_destroy_pgtbl(pgtbl_t pgtbl, uint32 level);
+void   uvm_destroy_pgtbl(pgtbl_t pgtbl);
 void   uvm_copy_pgtbl(pgtbl_t old, pgtbl_t new, uint64 heap_top, uint32 ustack_pages, mmap_region_t* mmap);
 
 void   uvm_mmap(uint64 begin, uint32 npages, int perm);
