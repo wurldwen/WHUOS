@@ -1,10 +1,13 @@
 #include "riscv.h"
 #include "lib/print.h"
-#include "dev/uart.h"
-#include "dev/plic.h"
+#include "mem/pmem.h"
+#include "mem/vmem.h"
+#include "proc/cpu.h"
+#include "proc/proc.h"
 #include "trap/trap.h"
 
 volatile static int started = 0;
+
 int main()
 {
     int cpuid = r_tp();
@@ -13,53 +16,54 @@ int main()
         // CPU 0: 主核心初始化
         print_init();
 
-        printf("\n=== WHU OS Lab 3: External Interrupt Test ===\n");
-        printf("Testing UART external interrupts...\n\n");
+        printf("\n=== WHU OS Lab 4: First User Process ===\n");
+        printf("Initializing system...\n\n");
 
-        // 初始化中断系统（但还不使能UART中断）
-        plic_init();              // 初始化PLIC中断控制器
-        trap_kernel_init();       // 初始化内核trap系统
-        trap_kernel_inithart();   // 初始化当前核心的trap
-        plic_inithart();          // 初始化当前核心的PLIC
-
-        printf("PLIC initialized\n");
+        // 初始化物理内存管理器
+        pmem_init();
+        printf("Physical memory initialized\n");
+        
+        // 初始化内核虚拟内存（页表）
+        kvm_init();
+        printf("Kernel virtual memory initialized\n");
+        
+        // 初始化当前 hart 的虚拟内存
+        kvm_inithart();
+        printf("Kernel VM enabled for hart %d\n", cpuid);
+        
+        // 初始化 CPU 结构
+        cpu_init();
+        printf("CPU structures initialized\n");
+        
+        // 初始化内核trap系统
+        trap_kernel_init();
+        trap_kernel_inithart();
         printf("Trap system initialized\n");
-
-        // 使能系统中断
-        intr_on();
-        printf("System interrupts enabled\n");
-
-        // 在系统中断使能后再初始化UART（避免中断堆积）
-        uart_init();              // 初始化UART串口并使能UART中断
-        printf("UART initialized\n\n");
-
-        printf("CPU %d is ready!\n", cpuid);
-        printf("=== UART External Interrupt Test ===\n");
-        printf("Please type characters to test UART interrupt.\n");
-        printf("Each character you type will trigger an external interrupt.\n");
-        printf("Press Ctrl+A then X to exit QEMU.\n\n");
+        
+        printf("\nSystem initialization complete.\n");
+        printf("Creating first user process (proczero)...\n\n");
         
         __sync_synchronize();
         started = 1;  // 允许其他CPU继续启动
+        
+        // 创建并切换到第一个用户进程
+        // 注意：这个函数不会返回，它会直接切换到用户态
+        proc_make_fisrt();
 
     } else {
         // 其他CPU核心初始化
         while(started == 0);
         __sync_synchronize();
         
-        // 其他CPU核心也需要初始化trap和plic
-        trap_kernel_inithart();   // 初始化当前核心的trap
-        plic_inithart();          // 初始化当前核心的PLIC
-        
-        // 使能中断
-        intr_on();
+        // 其他CPU核心初始化虚拟内存和trap
+        kvm_inithart();
+        trap_kernel_inithart();
         
         printf("CPU %d is ready!\n", cpuid);
     }
 
-    // 主循环：等待中断
+    // 其他CPU的主循环
     while (1) {
-        // 可以在这里添加其他测试代码
-        // 中断会自动被处理
+        // 空循环，等待调度
     }
 }

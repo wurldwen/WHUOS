@@ -31,5 +31,21 @@
 #define CLINT_MTIMECMP(hartid) (CLINT_BASE + 0x4000 + 8 * (hartid))
 #define CLINT_MTIME (CLINT_BASE + 0xBFF8)
 
+// 用户地址空间布局
+// one beyond the highest possible virtual address.
+// MAXVA is actually one bit less than the max allowed by
+// Sv39, to avoid having to sign-extend virtual addresses
+// that have the high bit set.
+#define MAXVA (1L << (9 + 9 + 9 + 12 - 1))
+
+// map the trampoline page to the highest address,
+// in both user and kernel space.
+#define TRAMPOLINE (MAXVA - PGSIZE)
+
+// map the trapframe page just below TRAMPOLINE, for trampoline.S
+#define TRAPFRAME (TRAMPOLINE - PGSIZE)
+
+#endif
+
 
 #endif
