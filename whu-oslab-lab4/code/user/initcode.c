@@ -1,10 +1,13 @@
 #include "sys.h"
 
-// start() is the entry point for the first user process
-// The linker script will set this as the entry point at address 0x1000
-void start()
+int main()
 {
-    syscall(SYS_print);
-    syscall(SYS_print);
+    long long heap_top = syscall(SYS_brk, 0);
+
+    heap_top = syscall(SYS_brk, heap_top + 4096 * 10);
+
+    heap_top = syscall(SYS_brk, heap_top - 4096 * 5);
+
     while(1);
+    return 0;
 }
