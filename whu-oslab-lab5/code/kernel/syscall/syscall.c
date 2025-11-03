@@ -19,7 +19,18 @@ static uint64 (*syscalls[])(void) = {
 // 系统调用
 void syscall()
 {
-
+    proc_t* p = myproc();
+    uint64 num = p->tf->a7;  // 系统调用号存储在 a7 寄存器中
+    
+    // 检查系统调用号是否有效
+    if (num > 0 && num < sizeof(syscalls)/sizeof(syscalls[0]) && syscalls[num]) {
+        // 调用对应的系统调用处理函数，结果存储到 a0 寄存器
+        p->tf->a0 = syscalls[num]();
+    } else {
+        // 无效的系统调用号
+        printf("syscall: unknown syscall number %d\n", num);
+        p->tf->a0 = -1;
+    }
 }
 
 /*
