@@ -2,7 +2,7 @@
 #include "mem/pmem.h"
 #include "memlayout.h"
 #include "riscv.h"
-#include "proc/proc.h"
+#include "proc/cpu.h"
 #include "lib/print.h"
 #include "lib/str.h"
 

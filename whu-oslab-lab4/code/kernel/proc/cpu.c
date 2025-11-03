@@ -1,4 +1,4 @@
-#include "proc/proc.h"
+#include "proc/cpu.h"
 #include "riscv.h"
 
 static cpu_t cpus[NCPU];
@@ -21,4 +21,9 @@ cpu_t* mycpu(void)
 int mycpuid(void) 
 {
     return r_tp();
+}
+
+proc_t* myproc(void)
+{
+    
 }
