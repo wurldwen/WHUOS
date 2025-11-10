@@ -69,18 +69,14 @@ whu-oslab-lab4/code/
 1. 在一个终端启动 QEMU，并暂停等待 gdb 连接：
 
 ```sh
-qemu-system-riscv64 -machine virt -bios none -kernel kernel/kernel \
-    -m 128M -smp 2 -nographic -serial mon:stdio -S -gdb tcp::26000
+cd /home/hwt/桌面/sources/lab/OSLab/WHUOS/whu-oslab-lab6/code
+make qemu-gdb
 ```
 
 2. 在另一终端启动 gdb：
 
 ```sh
-riscv64-unknown-elf-gdb kernel/kernel
-(gdb) target remote :26000
-(gdb) b trap_kernel_handler
-(gdb) b timer_interrupt_handler
-(gdb) c
+gdb-multiarch kernel-qemu.elf -ex "target remote :26000" -ex "b trap_user_return" -ex "c"gdb-multiarch kernel-qemu.elf -ex "target remote :26000" -ex "b trap_user_return" -ex "c"
 ```
 
 ### 常用调试命令

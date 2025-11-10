@@ -5,7 +5,7 @@ KERNEL_ELF = kernel-qemu
 CPUNUM = 2
 FS_IMG = none
 
-.PHONY: clean $(KERN)
+.PHONY: clean $(KERN) build qemu qemu-gdb
 
 $(KERN):
 	$(MAKE) build --directory=$@

@@ -142,6 +142,12 @@ void kvm_inithart()
     sfence_vma();
 }
 
+// 获取内核页表
+pgtbl_t kvm_get_kernel_pgtbl()
+{
+    return kernel_pgtbl;
+}
+
 // 调试用：打印页表中非空的 PTE（简易版）
 void vm_print(pgtbl_t pgtbl)
 {

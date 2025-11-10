@@ -27,6 +27,8 @@ void trap_user_handler()
     uint64 stval = r_stval();        // 发生trap时保存的附加信息(不同trap不一样)
     proc_t* p = myproc();
 
+    //printf("[trap_user_handler] Got trap! scause=%p, sepc=%p, stval=%p\n", scause, sepc, stval);
+
     // 确认trap来自U-mode
     assert((sstatus & SSTATUS_SPP) == 0, "trap_user_handler: not from u-mode");
 
@@ -48,7 +50,7 @@ void trap_user_handler()
         } else {
             // 其他异常
             printf("[User Trap] Exception: %s\n", exception_info[cause]);
-            printf("  sepc = 0x%lx, stval = 0x%lx\n", sepc, stval);
+            printf("  sepc = %p, stval = %p\n", sepc, stval);
         }
     }
     
@@ -62,8 +64,8 @@ void trap_user_return()
 {
     proc_t* p = myproc();
     
-    printf("[trap_user_return] Returning to user mode, epc=0x%lx, sp=0x%lx\n", 
-           p->tf->epc, p->tf->sp);
+    //printf("[trap_user_return] Returning to user mode, epc=%p, sp=%p\n", 
+    //       p->tf->epc, p->tf->sp);
     
     // 关中断，避免在切换页表时被打断
     intr_off();
@@ -80,10 +82,13 @@ void trap_user_return()
     
     // 切换到用户页表
     uint64 satp = MAKE_SATP(p->pgtbl);
+
+    //printf("satp =%p\n", satp);
     
     // 调用 trampoline.S 中的 user_return
     // 它会恢复用户态寄存器并执行 sret 返回用户态
     // 参数：用户页表的 SATP 值，trapframe 的虚拟地址
+    //printf("addr of user_return: %p\n", (uint64)user_return - (uint64)trampoline + TRAMPOLINE);
     ((void (*)(uint64, uint64))((uint64)user_return - (uint64)trampoline + TRAMPOLINE))
-        (satp, TRAPFRAME);
+        (TRAPFRAME, satp);
 }

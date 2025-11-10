@@ -8,12 +8,14 @@
 
 // 系统调用跳转
 static uint64 (*syscalls[])(void) = {
+    [SYS_print]         sys_print,
     [SYS_brk]           sys_brk,
     [SYS_mmap]          sys_mmap,
     [SYS_munmap]        sys_munmap,
-    [SYS_copyin]        sys_copyin,
-    [SYS_copyout]       sys_copyout,
-    [SYS_copyinstr]     sys_copyinstr,
+    [SYS_fork]          sys_fork,
+    [SYS_wait]          sys_wait,
+    [SYS_exit]          sys_exit,
+    [SYS_sleep]         sys_sleep,
 };
 
 // 系统调用
@@ -23,7 +25,7 @@ void syscall()
     uint64 num = p->tf->a7;  // 系统调用号存储在 a7 寄存器中
     
     // 检查系统调用号是否有效
-    if (num > 0 && num < sizeof(syscalls)/sizeof(syscalls[0]) && syscalls[num]) {
+    if (num >= 0 && num <= SYS_MAX && syscalls[num]) {
         // 调用对应的系统调用处理函数，结果存储到 a0 寄存器
         p->tf->a0 = syscalls[num]();
     } else {
