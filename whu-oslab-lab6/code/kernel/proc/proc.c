@@ -243,7 +243,8 @@ void proc_make_first()
         panic("proc_make_first: pmem_alloc for stack");
     memset((void*)pa, 0, PGSIZE);
     vm_mappages(p->pgtbl, p->heap_top, pa, PGSIZE, PTE_R | PTE_W | PTE_U);
-    
+
+    printf("initcode:%p\n", initcode);
     // 准备trapframe，设置返回到用户态的初始状态
     p->tf->epc = PGSIZE;  // 用户程序计数器 - 指向initcode开始
     p->tf->sp = p->heap_top + PGSIZE;  // 用户栈指针 (栈顶)

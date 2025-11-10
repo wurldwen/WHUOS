@@ -35,8 +35,8 @@ void trap_user_handler()
     // 判断是中断还是异常
     if(scause & (1UL << 63)) {
         // 中断
-        uint64 cause = scause & 0xFF;
-        printf("[User Trap] Interrupt: %s\n", interrupt_info[cause]);
+        //uint64 cause = scause & 0xFF;
+        //printf("[User Trap] Interrupt: %s\n", interrupt_info[cause]);
     } else {
         // 异常
         uint64 cause = scause & 0xFF;
@@ -50,7 +50,8 @@ void trap_user_handler()
         } else {
             // 其他异常
             printf("[User Trap] Exception: %s\n", exception_info[cause]);
-            printf("  sepc = %p, stval = %p\n", sepc, stval);
+            printf("  sepc = %p, scause = %p,stval = %p\n", sepc,scause, stval);
+            panic("trap_user_handler: unhandled exception");
         }
     }
     
@@ -64,8 +65,7 @@ void trap_user_return()
 {
     proc_t* p = myproc();
     
-    //printf("[trap_user_return] Returning to user mode, epc=%p, sp=%p\n", 
-    //       p->tf->epc, p->tf->sp);
+    //printf("[trap_user_return] Returning to user mode, epc=%p, sp=%p\n",        p->tf->epc, p->tf->sp);
     
     // 关中断，避免在切换页表时被打断
     intr_off();
@@ -82,7 +82,7 @@ void trap_user_return()
     
     // 切换到用户页表
     uint64 satp = MAKE_SATP(p->pgtbl);
-
+    w_sepc(p->tf->epc);  // 设置返回用户态的pc
     //printf("satp =%p\n", satp);
     
     // 调用 trampoline.S 中的 user_return
