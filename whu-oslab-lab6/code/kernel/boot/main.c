@@ -2,6 +2,7 @@
 #include "lib/print.h"
 #include "mem/pmem.h"
 #include "mem/vmem.h"
+#include "mem/mmap.h"
 #include "proc/cpu.h"
 #include "proc/proc.h"
 #include "trap/trap.h"
@@ -22,6 +23,10 @@ int main()
         // 初始化物理内存管理器
         pmem_init();
         printf("Physical memory initialized\n");
+        
+        // 初始化mmap区域管理器
+        mmap_init();
+        printf("MMAP region allocator initialized\n");
         
         // 初始化内核虚拟内存（页表）
         kvm_init();
