@@ -34,12 +34,12 @@ int main()
     str2[4] = '\n';
     str2[5] = '\0';
 
-    syscall(SYS_print, str1);
-    syscall(SYS_print, str2);
+    //syscall(SYS_print, str1);
+    //syscall(SYS_print, str2);
     int pid = syscall(SYS_fork);
 
     if(pid == 0) { // 子进程
-        for(int i = 0; i < 100000000; i++);
+        for(int i = 0; i < 10; i++);
         syscall(SYS_print, "child: hello\n");
         syscall(SYS_print, str1);
         syscall(SYS_print, str2);
