@@ -287,9 +287,12 @@ int proc_fork()
         while(src) {
             mmap_region_t* new_region = mmap_region_alloc();
             if(new_region == 0) {
-                // 释放已分配的mmap区域
-                if(dst_head)
+                // 释放已分配的mmap区域 - 需要释放整个链表
+                while(dst_head) {
+                    mmap_region_t* next = dst_head->next;
                     mmap_region_free(dst_head);
+                    dst_head = next;
+                }
                 proc_free(np);
                 spinlock_release(&np->lk);
                 return -1;
