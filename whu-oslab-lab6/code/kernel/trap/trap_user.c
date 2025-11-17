@@ -2,6 +2,7 @@
 #include "trap/trap.h"
 #include "proc/cpu.h"
 #include "mem/vmem.h"
+#include "syscall/syscall.h"
 #include "memlayout.h"
 #include "riscv.h"
 
@@ -46,6 +47,16 @@ void trap_user_handler()
             printf("[User Trap] System call from user mode %p scause:%p,stval:%p\n",p->tf->epc,scause,stval);
             // sepc 指向 ecall 指令，需要跳过它（4字节）
             p->tf->epc += 4;
+            // if(killed(p))
+            //      exit(-1);
+
+            // 启用中断
+            // 中断会改变 sepc、scause 和 sstatus，
+            // 所以只有在我们完成这些寄存器的操作后才启用中断。
+            intr_on();
+
+            // 调用系统调用处理函数
+            syscall();
         } else {
             // 其他异常
             printf("[User Trap] Exception: %s\n", exception_info[cause]);
