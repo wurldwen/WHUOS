@@ -78,8 +78,8 @@ found:
     p->pid = alloc_pid();
     p->state = RUNNABLE;
     
-    // 分配trapframe页
-    if((p->tf = (trapframe_t*)pmem_alloc(false)) == 0) {
+    // 分配trapframe页 (从内核区域分配)
+    if((p->tf = (trapframe_t*)pmem_alloc(true)) == 0) {
         proc_free(p);
         spinlock_release(&p->lk);
         return NULL;
@@ -118,9 +118,9 @@ found:
 // tips: 调用者需持有p->lk
 void proc_free(proc_t* p)
 {
-    // 释放trapframe
+    // 释放trapframe (从内核区域释放)
     if(p->tf) {
-        pmem_free((uint64)p->tf, false);
+        pmem_free((uint64)p->tf, true);
     }
     p->tf = 0;
     
@@ -356,7 +356,6 @@ void proc_yield()
     spinlock_release(&p->lk);
 }
 
-// 等待一个子进程进入 ZOMBIE 状态
 // 将退出的子进程的exit_state放入用户给的地址 addr
 // 成功返回子进程pid，失败返回-1
 int proc_wait(uint64 addr)
@@ -364,6 +363,8 @@ int proc_wait(uint64 addr)
     proc_t* pp;
     int havekids, pid;
     proc_t* p = myproc();
+    
+    printf("[WAIT] pid=%d entering wait\n", p->pid);
     
     // 获取wait_lock
     spinlock_acquire(&wait_lock);
@@ -374,12 +375,17 @@ int proc_wait(uint64 addr)
         for(pp = procs; pp < &procs[NPROC]; pp++) {
             // 确保是当前进程的子进程
             if(pp->parent == p) {
+                // 确保子进程不在exit()或swtch()中
                 spinlock_acquire(&pp->lk);
                 
                 havekids = 1;
+                printf("[WAIT] pid=%d found child pid=%d, state=%d\n", p->pid, pp->pid, pp->state);
+                
                 if(pp->state == ZOMBIE) {
                     // 找到一个僵尸子进程
                     pid = pp->pid;
+                    
+                    printf("[WAIT] pid=%d found zombie child pid=%d\n", p->pid, pid);
                     
                     // 将exit_state复制到用户地址
                     if(addr != 0) {
@@ -390,6 +396,8 @@ int proc_wait(uint64 addr)
                     proc_free(pp);
                     spinlock_release(&pp->lk);
                     spinlock_release(&wait_lock);
+                    
+                    printf("[WAIT] pid=%d returning with child pid=%d\n", p->pid, pid);
                     return pid;
                 }
                 spinlock_release(&pp->lk);
@@ -398,12 +406,18 @@ int proc_wait(uint64 addr)
         
         // 如果没有子进程，返回-1
         if(!havekids) {
+            printf("[WAIT] pid=%d no children, returning -1\n", p->pid);
             spinlock_release(&wait_lock);
             return -1;
         }
         
-        // 等待子进程退出 - 传入wait_lock
+        printf("[WAIT] pid=%d going to sleep\n", p->pid);
+        
+        // 等待子进程退出
+        // sleep会释放wait_lock并原子地让进程睡眠
         proc_sleep(p, &wait_lock);
+        
+        printf("[WAIT] pid=%d woke up, checking again\n", p->pid);
     }
 }
 
@@ -426,17 +440,15 @@ void proc_exit(int exit_state)
 {
     proc_t* p = myproc();
     
-    // init进程不能退出
-    if(p == proczero)
-        panic("proc_exit: proczero exiting");
+    assert(p != proczero, "proc_exit: proczero exit");
     
     // 获取wait_lock
     spinlock_acquire(&wait_lock);
     
-    // 将所有子进程的父进程设置为proczero
+    // 将子进程交给proczero
     proc_reparent(p);
     
-    // 唤醒父进程
+    // 唤醒父进程（可能在wait中睡眠）
     proc_wakeup(p->parent);
     
     // 获取进程锁
@@ -448,7 +460,8 @@ void proc_exit(int exit_state)
     // 释放wait_lock
     spinlock_release(&wait_lock);
     
-    // 跳转到调度器，永不返回
+    // 调度器不会再调度到这个进程
+    // 跳入调度器，永不返回
     proc_sched();
     
     panic("proc_exit: zombie exit");
@@ -470,8 +483,12 @@ void proc_sched()
     // 检查状态不是RUNNING
     assert(p->state != RUNNING, "proc_sched: running");
     
+    printf("[SCHED] pid=%d calling swtch, kstack=%p, sp=%p\n", p->pid, p->kstack, p->ctx.sp);
+    
     // 切换到调度器上下文
     swtch(&p->ctx, &mycpu()->ctx);
+    
+    printf("[SCHED] pid=%d returned from swtch\n", p->pid);
 }
 
 // 调度器
@@ -482,18 +499,29 @@ void proc_scheduler()
     
     c->proc = 0;
     
+    printf("[SCHEDULER] CPU%d starting scheduler\n", mycpuid());
+    
     for(;;) {
         // 遍历进程表寻找可运行的进程
         for(p = procs; p < &procs[NPROC]; p++) {
             spinlock_acquire(&p->lk);
             
             if(p->state == RUNNABLE) {
+                printf("[SCHEDULER] CPU%d found RUNNABLE pid=%d\n", mycpuid(), p->pid);
+                
                 // 找到一个可运行的进程，切换到它
                 p->state = RUNNING;
                 c->proc = p;
                 
+                printf("[SCHEDULER] CPU%d switching to pid=%d, ra=%p, sp=%p\n", 
+                       mycpuid(), p->pid, p->ctx.ra, p->ctx.sp);
+                
                 // 切换到进程上下文
+                // 注意：进程会在某个时刻返回到这里，那时它仍然持有p->lk
+                // 进程需要自己释放这个锁
                 swtch(&c->ctx, &p->ctx);
+                
+                printf("[SCHEDULER] CPU%d returned from pid=%d\n", mycpuid(), p->pid);
                 
                 // 进程返回后，清除CPU的进程指针
                 c->proc = 0;
@@ -505,14 +533,18 @@ void proc_scheduler()
 }
 
 // 进程睡眠在sleep_space
+// 调用者必须持有lk锁，sleep会原子地释放lk并使进程睡眠
+// 唤醒后重新获取lk
 void proc_sleep(void* sleep_space, spinlock_t* lk)
 {
     proc_t* p = myproc();
     
-    // 必须持有进程锁才能修改状态
-    spinlock_acquire(&p->lk);
+    printf("[SLEEP] pid=%d sleeping on %p\n", p->pid, sleep_space);
     
-    // 释放传入的锁
+    // 必须获取p->lock才能修改p->state
+    // 一旦我们持有p->lock，我们可以保证不会错过任何唤醒
+    // （wakeup会锁p->lock），所以可以安全地释放lk
+    spinlock_acquire(&p->lk);
     spinlock_release(lk);
     
     // 进入睡眠
@@ -521,23 +553,36 @@ void proc_sleep(void* sleep_space, spinlock_t* lk)
     
     proc_sched();
     
+    int test_var = 42;
+    printf("[SLEEP] pid=%d test_var=%d\n", p ? p->pid : -1, test_var);
+    
     // 醒来后清理
     p->sleep_space = 0;
     
+    printf("[SLEEP] pid=%d releasing p->lk\n", p->pid);
+    
     // 重新获取原来的锁
     spinlock_release(&p->lk);
+    
+    printf("[SLEEP] pid=%d acquiring lk\n", p->pid);
     spinlock_acquire(lk);
+    
+    printf("[SLEEP] pid=%d done\n", p->pid);
 }
 
 // 唤醒所有在sleep_space沉睡的进程
+// 必须在没有持有任何p->lock的情况下调用
 void proc_wakeup(void* sleep_space)
 {
     proc_t* p;
+    
+    printf("[WAKEUP] waking up processes on %p\n", sleep_space);
     
     for(p = procs; p < &procs[NPROC]; p++) {
         if(p != myproc()) {
             spinlock_acquire(&p->lk);
             if(p->state == SLEEPING && p->sleep_space == sleep_space) {
+                printf("[WAKEUP] waking up pid=%d\n", p->pid);
                 p->state = RUNNABLE;
             }
             spinlock_release(&p->lk);

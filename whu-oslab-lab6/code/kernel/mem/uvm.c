@@ -122,8 +122,8 @@ void uvm_destroy_pgtbl(pgtbl_t pgtbl)
     // 递归销毁页表（从顶级页表开始，level=2）
     destroy_pgtbl(pgtbl, 2);
     
-    // 最后释放顶级页表本身（内核页）
-    pmem_free((uint64)pgtbl, true);
+    // 最后释放顶级页表本身（用户页表从用户区域分配，所以用false）
+    pmem_free((uint64)pgtbl, false);
 }
 
 // 拷贝页表 (拷贝并不包括trapframe 和 trampoline)

@@ -114,7 +114,10 @@ uint64 sys_print()
 // 进程复制
 uint64 sys_fork()
 {
-    return proc_fork();
+    printf("DEBUG: sys_fork called, pid=%d\n", myproc()->pid);
+    uint64 result = proc_fork();
+    printf("DEBUG: sys_fork returning, result=%d, parent_pid=%d\n", result, myproc()->pid);
+    return result;
 }
 
 // 进程等待
@@ -124,7 +127,13 @@ uint64 sys_wait()
     uint64 addr;
     arg_uint64(0, &addr);
     
-    return proc_wait(addr);
+    printf("DEBUG: sys_wait called, pid=%d, addr=%p\n", myproc()->pid, addr);
+    
+    uint64 result = proc_wait(addr);
+    
+    printf("DEBUG: sys_wait returning, result=%d\n", result);
+    
+    return result;
 }
 
 // 进程退出

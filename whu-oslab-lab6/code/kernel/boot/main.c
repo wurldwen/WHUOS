@@ -37,6 +37,9 @@ int main()
         kvm_inithart();
 //        printf("Kernel VM enabled for hart %d\n", cpuid);
         
+        // 初始化进程表
+        proc_init();
+        
         // 初始化 CPU 结构
         cpu_init();
 //        printf("CPU structures initialized\n");
