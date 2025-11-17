@@ -228,7 +228,7 @@ void proc_make_first()
     
     // 映射initcode到虚拟地址PGSIZE
     memset((void*)pa, 0, PGSIZE);
-    vm_mappages(p->pgtbl, PGSIZE, pa, PGSIZE, PTE_R | PTE_W | PTE_X | PTE_U);
+    vm_mappages(p->pgtbl, 0, pa, PGSIZE, PTE_R | PTE_W | PTE_X | PTE_U);
     
     // 复制initcode到物理页
     memmove((void*)pa, initcode, initcode_len);
@@ -246,7 +246,7 @@ void proc_make_first()
 
     printf("initcode:%p\n", initcode);
     // 准备trapframe，设置返回到用户态的初始状态
-    p->tf->epc = PGSIZE;  // 用户程序计数器 - 指向initcode开始
+    p->tf->epc = 0;  // 用户程序计数器 - 指向initcode开始
     p->tf->sp = p->heap_top + PGSIZE;  // 用户栈指针 (栈顶)
     
     // 设置进程状态为RUNNABLE

@@ -76,7 +76,7 @@ make qemu-gdb
 2. 在另一终端启动 gdb：
 
 ```sh
-gdb-multiarch kernel-qemu.elf -ex "target remote :26000" -ex "b trap_user_return" -ex "c"gdb-multiarch kernel-qemu.elf -ex "target remote :26000" -ex "b trap_user_return" -ex "c"
+gdb-multiarch kernel-qemu.elf -ex "target remote :26000" 
 ```
 
 ### 常用调试命令

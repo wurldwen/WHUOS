@@ -20,13 +20,12 @@ extern char* exception_info[16]; // 异常错误信息
 // 在user_vector()里面调用
 // 用户态trap处理的核心逻辑
 void trap_user_handler()
-{
-    uint64 sepc = r_sepc();          // 记录了发生异常时的pc值
+{         
     uint64 sstatus = r_sstatus();    // 与特权模式和中断相关的状态信息
     uint64 scause = r_scause();      // 引发trap的原因
     uint64 stval = r_stval();        // 发生trap时保存的附加信息(不同trap不一样)
     proc_t* p = myproc();
-
+    p->tf->epc = r_sepc();          // 记录了发生异常时的pc值
     //printf("[trap_user_handler] Got trap! scause=%p, sepc=%p, stval=%p\n", scause, sepc, stval);
 
     // 确认trap来自U-mode
@@ -44,13 +43,13 @@ void trap_user_handler()
         // 处理系统调用 (ecall from U-mode)
         if(cause == 8) {
             // 系统调用
-            printf("[User Trap] System call from user mode\n");
+            printf("[User Trap] System call from user mode %p scause:%p,stval:%p\n",p->tf->epc,scause,stval);
             // sepc 指向 ecall 指令，需要跳过它（4字节）
             p->tf->epc += 4;
         } else {
             // 其他异常
             printf("[User Trap] Exception: %s\n", exception_info[cause]);
-            printf("  sepc = %p, scause = %p,stval = %p\n", sepc,scause, stval);
+            printf("  sepc = %p, scause = %p,stval = %p\n", p->tf->epc,scause, stval);
             panic("trap_user_handler: unhandled exception");
         }
     }
