@@ -145,6 +145,7 @@ void proc_free(proc_t* p)
     p->exit_state = 0;
     p->sleep_space = 0;
     p->heap_top = 0;
+    p->ustack_base = 0;
     p->ustack_pages = 0;
     p->state = UNUSED;
 }
@@ -233,21 +234,24 @@ void proc_make_first()
     // 复制initcode到物理页
     memmove((void*)pa, initcode, initcode_len);
     
-    // 设置heap_top
-    p->heap_top = 2 * PGSIZE;
+    // 设置heap_top: 堆顶初始在第二页之后，为堆预留增长空间
+    // 第一页(0-PGSIZE)是代码，第二页及之后可用于堆
+    p->heap_top = PGSIZE;
     
-    // 分配用户栈 (1页) - 映射到heap_top位置
+    // 分配用户栈 (1页) - 映射到较高地址，避免与堆冲突
+    // 栈基址设置为一个较高的地址，为堆预留足够增长空间
+    p->ustack_base = 0x10000;  // 64KB，给堆留出空间
     p->ustack_pages = 1;
     pa = (uint64)pmem_alloc(false);
     if(pa == 0)
         panic("proc_make_first: pmem_alloc for stack");
     memset((void*)pa, 0, PGSIZE);
-    vm_mappages(p->pgtbl, p->heap_top, pa, PGSIZE, PTE_R | PTE_W | PTE_U);
+    vm_mappages(p->pgtbl, p->ustack_base, pa, PGSIZE, PTE_R | PTE_W | PTE_U);
 
     printf("initcode:%p\n", initcode);
     // 准备trapframe，设置返回到用户态的初始状态
-    p->tf->epc = 0;  // 用户程序计数器 - 指向initcode开始
-    p->tf->sp = p->heap_top + PGSIZE;  // 用户栈指针 (栈顶)
+    p->tf->epc = 0;  // 用户程序计数器 - 指向地址0处的initcode开始
+    p->tf->sp = p->ustack_base + PGSIZE;  // 用户栈指针 (栈顶)
     
     // 设置进程状态为RUNNABLE
     p->state = RUNNABLE;
@@ -273,8 +277,11 @@ int proc_fork()
     }
     
     // 复制页表和内存
-    uvm_copy_pgtbl(p->pgtbl, np->pgtbl, p->heap_top, p->ustack_pages, p->mmap);
+    printf("DEBUG: About to call uvm_copy_pgtbl with heap_top=0x%lx, ustack_base=0x%lx\n", p->heap_top, p->ustack_base);
+    uvm_copy_pgtbl(p->pgtbl, np->pgtbl, p->heap_top, p->ustack_base, p->ustack_pages, p->mmap);
+    printf("DEBUG: uvm_copy_pgtbl returned\n");
     np->heap_top = p->heap_top;
+    np->ustack_base = p->ustack_base;
     np->ustack_pages = p->ustack_pages;
     
     // 复制mmap区域列表

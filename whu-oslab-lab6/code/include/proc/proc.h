@@ -105,6 +105,7 @@ typedef struct proc {
 
     pgtbl_t pgtbl;           // 用户态页表
     uint64 heap_top;         // 用户堆顶(以字节为单位)
+    uint64 ustack_base;      // 用户栈基地址
     uint64 ustack_pages;     // 用户栈占用的页面数量
     mmap_region_t* mmap;     // 用户可映射区域的起始节点
     trapframe_t* tf;         // 用户态内核态切换时的运行环境暂存空间

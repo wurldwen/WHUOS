@@ -12,14 +12,14 @@ int main()
 {
     syscall(SYS_print, "\nuser begin\n");
 
-    // 测试MMAP区域
+    // //测试MMAP区域
     str1 = (char*)syscall(SYS_mmap, MMAP_BEGIN, PGSIZE);
     
-    //测试HEAP区域
+    // //测试HEAP区域
     long long top = syscall(SYS_brk, 0);
     str2 = (char*)top;
     syscall(SYS_brk, top + PGSIZE);
-
+    //不使用上面代码分配的话两个字符串会指向同一处
     str1[0] = 'M';
     str1[1] = 'M';
     str1[2] = 'A';
@@ -34,24 +34,26 @@ int main()
     str2[4] = '\n';
     str2[5] = '\0';
 
-    int pid = syscall(SYS_fork);
+    syscall(SYS_print, str1);
+    syscall(SYS_print, str2);
+    // int pid = syscall(SYS_fork);
 
-    if(pid == 0) { // 子进程
-        for(int i = 0; i < 100000000; i++);
-        syscall(SYS_print, "child: hello\n");
-        syscall(SYS_print, str1);
-        syscall(SYS_print, str2);
+    // if(pid == 0) { // 子进程
+    //     for(int i = 0; i < 100000000; i++);
+    //     syscall(SYS_print, "child: hello\n");
+    //     //syscall(SYS_print, str1);
+    //     //syscall(SYS_print, str2);
 
-        syscall(SYS_exit, 1);
-        syscall(SYS_print, "child: never back\n");
-    } else {       // 父进程
-        int exit_state;
-        syscall(SYS_wait, &exit_state);
-        if(exit_state == 1)
-            syscall(SYS_print, "parent: hello\n");
-        else
-            syscall(SYS_print, "parent: error\n");
-    }
+    //     syscall(SYS_exit, 1);
+    //     syscall(SYS_print, "child: never back\n");
+    // } else {       // 父进程
+    //     int exit_state;
+    //     syscall(SYS_wait, &exit_state);
+    //     if(exit_state == 1)
+    //         syscall(SYS_print, "parent: hello\n");
+    //     else
+    //         syscall(SYS_print, "parent: error\n");
+    // }
 
     while(1);
     return 0;
