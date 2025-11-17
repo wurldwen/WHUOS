@@ -36,24 +36,24 @@ int main()
 
     syscall(SYS_print, str1);
     syscall(SYS_print, str2);
-    // int pid = syscall(SYS_fork);
+    int pid = syscall(SYS_fork);
 
-    // if(pid == 0) { // 子进程
-    //     for(int i = 0; i < 100000000; i++);
-    //     syscall(SYS_print, "child: hello\n");
-    //     //syscall(SYS_print, str1);
-    //     //syscall(SYS_print, str2);
+    if(pid == 0) { // 子进程
+        //for(int i = 0; i < 100000000; i++);
+        syscall(SYS_print, "child: hello\n");
+        //syscall(SYS_print, str1);
+        //syscall(SYS_print, str2);
 
-    //     syscall(SYS_exit, 1);
-    //     syscall(SYS_print, "child: never back\n");
-    // } else {       // 父进程
-    //     int exit_state;
-    //     syscall(SYS_wait, &exit_state);
-    //     if(exit_state == 1)
-    //         syscall(SYS_print, "parent: hello\n");
-    //     else
-    //         syscall(SYS_print, "parent: error\n");
-    // }
+        syscall(SYS_exit, 1);
+        syscall(SYS_print, "child: never back\n");
+    } else {       // 父进程
+        int exit_state;
+        syscall(SYS_wait, &exit_state);
+        if(exit_state == 1)
+            syscall(SYS_print, "parent: hello\n");
+        else
+            syscall(SYS_print, "parent: error\n");
+    }
 
     while(1);
     return 0;

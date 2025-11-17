@@ -277,9 +277,7 @@ int proc_fork()
     }
     
     // 复制页表和内存
-    printf("DEBUG: About to call uvm_copy_pgtbl with heap_top=0x%lx, ustack_base=0x%lx\n", p->heap_top, p->ustack_base);
     uvm_copy_pgtbl(p->pgtbl, np->pgtbl, p->heap_top, p->ustack_base, p->ustack_pages, p->mmap);
-    printf("DEBUG: uvm_copy_pgtbl returned\n");
     np->heap_top = p->heap_top;
     np->ustack_base = p->ustack_base;
     np->ustack_pages = p->ustack_pages;

@@ -17,9 +17,6 @@ static void copy_range(pgtbl_t old, pgtbl_t new, uint64 begin, uint64 end)
     for(va = begin; va < end; va += PGSIZE)
     {
         pte = vm_getpte(old, va, false);
-        if(pte == NULL || !((*pte) & PTE_V)) {
-            printf("copy_range: va=0x%lx, pte=%p, valid=%d\n", va, pte, pte ? ((*pte) & PTE_V) : 0);
-        }
         assert(pte != NULL, "uvm_copy_pgtbl: pte == NULL");
         assert((*pte) & PTE_V, "uvm_copy_pgtbl: pte not valid");
         
@@ -132,11 +129,8 @@ void uvm_destroy_pgtbl(pgtbl_t pgtbl)
 // 拷贝页表 (拷贝并不包括trapframe 和 trampoline)
 void uvm_copy_pgtbl(pgtbl_t old, pgtbl_t new, uint64 heap_top, uint64 ustack_base, uint32 ustack_pages, mmap_region_t* mmap)
 {
-    printf("uvm_copy_pgtbl: heap_top=0x%lx, ustack_base=0x%lx, ustack_pages=%d\n", heap_top, ustack_base, ustack_pages);
-    
     /* step-1: 复制代码段 (第一页，地址0处的initcode) */
     // 第一个页包含initcode，需要复制
-    printf("Copying code page [0, 0x%lx)\n", PGSIZE);
     copy_range(old, new, 0, PGSIZE);
 
     /* step-2: 复制堆区域 (如果有堆分配) */
@@ -145,13 +139,11 @@ void uvm_copy_pgtbl(pgtbl_t old, pgtbl_t new, uint64 heap_top, uint64 ustack_bas
     // 由于堆通过 brk 按需分配，我们需要遍历并只复制已映射的页面
     uint64 heap_start = PGSIZE;  // 堆从 PGSIZE 开始增长
     if (heap_top > heap_start) {
-        printf("Copying heap region [0x%lx, 0x%lx)\n", heap_start, PG_ROUND_UP(heap_top));
         // 堆区域可能不是完全连续映射的，需要逐页检查
         for (uint64 va = heap_start; va < PG_ROUND_UP(heap_top); va += PGSIZE) {
             pte_t* pte = vm_getpte(old, va, false);
             if (pte != NULL && (*pte & PTE_V)) {
                 // 这个页面已映射，复制它
-                printf("  Copying heap page at 0x%lx\n", va);
                 uint64 pa = (uint64)PTE_TO_PA(*pte);
                 int flags = (int)PTE_FLAGS(*pte);
                 uint64 new_page = (uint64)pmem_alloc(false);
@@ -165,7 +157,6 @@ void uvm_copy_pgtbl(pgtbl_t old, pgtbl_t new, uint64 heap_top, uint64 ustack_bas
     // 用户栈在固定的 ustack_base 位置
     if (ustack_pages > 0) {
         uint64 ustack_end = ustack_base + ustack_pages * PGSIZE;
-        printf("Copying stack [0x%lx, 0x%lx)\n", ustack_base, ustack_end);
         copy_range(old, new, ustack_base, ustack_end);
     }
 
@@ -175,11 +166,9 @@ void uvm_copy_pgtbl(pgtbl_t old, pgtbl_t new, uint64 heap_top, uint64 ustack_bas
     while (tmp != NULL) {
         uint64 begin = tmp->begin;
         uint64 end = begin + tmp->npages * PGSIZE;
-        printf("Copying mmap region [0x%lx, 0x%lx)\n", begin, end);
         copy_range(old, new, begin, end);
         tmp = tmp->next;
     }
-    printf("uvm_copy_pgtbl: done\n");
 }
 
 // 在用户页表和进程mmap链里 新增mmap区域 [begin, begin + npages * PGSIZE)
