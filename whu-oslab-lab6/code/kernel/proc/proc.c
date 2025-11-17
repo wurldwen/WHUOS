@@ -31,6 +31,9 @@ static proc_t* proczero;
 static int global_pid = 1;
 static spinlock_t lk_pid;
 
+// wait/exit协调锁
+static spinlock_t wait_lock;
+
 
 // 申请一个pid(锁保护)
 static int alloc_pid()
@@ -157,6 +160,9 @@ void proc_init()
     
     // 初始化pid锁
     spinlock_init(&lk_pid, "nextpid");
+    
+    // 初始化wait_lock
+    spinlock_init(&wait_lock, "wait_lock");
     
     // 初始化所有进程
     for(p = procs; p < &procs[NPROC]; p++) {
@@ -359,6 +365,9 @@ int proc_wait(uint64 addr)
     int havekids, pid;
     proc_t* p = myproc();
     
+    // 获取wait_lock
+    spinlock_acquire(&wait_lock);
+    
     for(;;) {
         // 扫描进程表寻找退出的子进程
         havekids = 0;
@@ -380,6 +389,7 @@ int proc_wait(uint64 addr)
                     // 释放子进程资源
                     proc_free(pp);
                     spinlock_release(&pp->lk);
+                    spinlock_release(&wait_lock);
                     return pid;
                 }
                 spinlock_release(&pp->lk);
@@ -388,11 +398,12 @@ int proc_wait(uint64 addr)
         
         // 如果没有子进程，返回-1
         if(!havekids) {
+            spinlock_release(&wait_lock);
             return -1;
         }
         
-        // 等待子进程退出
-        proc_sleep(p, &p->lk);
+        // 等待子进程退出 - 传入wait_lock
+        proc_sleep(p, &wait_lock);
     }
 }
 
@@ -419,6 +430,9 @@ void proc_exit(int exit_state)
     if(p == proczero)
         panic("proc_exit: proczero exiting");
     
+    // 获取wait_lock
+    spinlock_acquire(&wait_lock);
+    
     // 将所有子进程的父进程设置为proczero
     proc_reparent(p);
     
@@ -430,6 +444,9 @@ void proc_exit(int exit_state)
     
     p->exit_state = exit_state;
     p->state = ZOMBIE;
+    
+    // 释放wait_lock
+    spinlock_release(&wait_lock);
     
     // 跳转到调度器，永不返回
     proc_sched();
