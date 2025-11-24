@@ -1,5 +1,6 @@
 #include "lib/lock.h"
 #include "lib/print.h"
+#include "proc/proc.h"
 #include "dev/timer.h"
 #include "memlayout.h"
 #include "riscv.h"
@@ -9,38 +10,35 @@
 // in trap.S M-mode时钟中断处理流程()
 extern void timer_vector();
 
-// 每个CPU在时钟中断中需要的临时空间(考虑为什么可以这么写)
+// 每个CPU在时钟中断中需要的临时空间
 static uint64 mscratch[NCPU][5];
 
 // 时钟初始化
-// called in start.c
 void timer_init()
 {
-    // 获取当前CPU的hartid
-    int hartid = r_mhartid();
+    // 获取当前cpuid
+    int hartid = r_tp();
 
-    // 设置第一次时钟中断的时间
-    // CLINT_MTIMECMP(hartid) = CLINT_MTIME + INTERVAL
+    // 一开始设置 cmp_time  = cur_time + time interval
+    // 之后每触发一次时钟中断 有 cmp_time += time interval
     *(uint64*)CLINT_MTIMECMP(hartid) = *(uint64*)CLINT_MTIME + INTERVAL;
 
-    // 准备timer_vector需要的信息
-    // mscratch[0..2]: timer_vector保存寄存器的空间
-    // mscratch[3]: CLINT_MTIMECMP(hartid)的地址
-    // mscratch[4]: 时钟中断间隔INTERVAL
-    uint64 *scratch = &mscratch[hartid][0];
+    // 指向当前CPU的mscratch, 与trap.S里的timer_vector密切配合
+    uint64* scratch = mscratch[hartid];
     scratch[3] = CLINT_MTIMECMP(hartid);
     scratch[4] = INTERVAL;
     w_mscratch((uint64)scratch);
 
-    // 设置M-mode trap处理函数为timer_vector
+    // 设置M-mode时钟中断处理函数
     w_mtvec((uint64)timer_vector);
 
-    // 使能M-mode中断
+    // M-mode中断使能(总开关)
     w_mstatus(r_mstatus() | MSTATUS_MIE);
 
-    // 使能M-mode时钟中断
+    // M-mode中断使能(时钟中断开关)
     w_mie(r_mie() | MIE_MTIE);
 }
+
 
 
 /*--------------------- 工作在S-mode --------------------*/
@@ -48,28 +46,27 @@ void timer_init()
 // 系统时钟
 timer_t sys_timer;
 
-// 时钟创建(初始化系统时钟)
+// 时钟创建
 void timer_create()
 {
-    // 初始化系统时钟
     sys_timer.ticks = 0;
-    spinlock_init(&sys_timer.lk, "timer");
+    spinlock_init(&sys_timer.lk, "sys_timer");
 }
 
-// 时钟更新(ticks++ with lock)
+// 时钟更新
 void timer_update()
 {
     spinlock_acquire(&sys_timer.lk);
     sys_timer.ticks++;
+    proc_wakeup(&sys_timer.ticks);
+    // printf("ticks = %d\n", sys_timer.ticks);
     spinlock_release(&sys_timer.lk);
 }
 
-// 返回系统时钟ticks
 uint64 timer_get_ticks()
 {
-    uint64 ticks;
     spinlock_acquire(&sys_timer.lk);
-    ticks = sys_timer.ticks;
+    uint64 ret = sys_timer.ticks; 
     spinlock_release(&sys_timer.lk);
-    return ticks;
+    return ret;
 }

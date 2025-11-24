@@ -40,7 +40,7 @@ void uart_init(void)
   // 进入设置比特率的模式
   WriteReg(LCR, LCR_BAUD_LATCH);
 
-  // 设置比特率的低位和高位，最终设置为38.4K
+  // 设置比特率的低位和高位, 最终设置为38.4K
   WriteReg(0, 0x03);
   WriteReg(1, 0x00);
 
@@ -88,17 +88,6 @@ void uart_intr(void)
   {
     int c = uart_getc_sync();
     if(c == -1) break;
-    
-    // 处理退格键（Backspace: ASCII 127 或 8）
-    if(c == 127 || c == 8) {
-      // 发送退格序列：退格 + 空格 + 退格
-      // 这样可以删除屏幕上的字符
-      uart_putc_sync(8);    // 退格，光标左移
-      uart_putc_sync(' ');  // 输出空格，覆盖字符
-      uart_putc_sync(8);    // 再次退格，光标回到原位
-    } else {
-      // 普通字符直接回显
-      uart_putc_sync(c);
-    }
+    uart_putc_sync(c);
   }
 }
