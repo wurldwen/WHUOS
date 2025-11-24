@@ -1,13 +1,13 @@
 此分支为第四次实验
 
-代码在 whu-oslab-lab4/code 中
+代码在 whu-oslab-lab6/code 中
 
-报告在 whu-oslab-lab4/report 中
+报告在 whu-oslab-lab6/report 中
 
 ## 代码组织结构
 
 ```
-whu-oslab-lab4/code/
+whu-oslab-lab6/code/
 ├── include/               # 头文件目录
 │   ├── common.h           # 公共定义
 │   ├── memlayout.h        # 内存布局定义（含 CLINT、PLIC、UART 地址）
