@@ -8,7 +8,7 @@ typedef struct buf {
         睡眠锁: 保护 data[BLOCK_SIZE] + disk
         block_num + buf_ref 由 lk_buf_cache保护
     */
-    sleeplock_t slk;
+    spinlock_t slk;
 
     uint32 block_num; // 对应的磁盘block编号
     uint8  data[BLOCK_SIZE]; // block数据的缓存

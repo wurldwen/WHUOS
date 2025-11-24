@@ -90,6 +90,9 @@ enum proc_state {
     ZOMBIE,       // 濒临死亡
 };
 
+// 前向声明
+typedef struct inode inode_t;
+
 // 进程定义
 typedef struct proc {
     
@@ -112,6 +115,8 @@ typedef struct proc {
 
     uint64 kstack;           // 内核栈的虚拟地址
     context_t ctx;           // 内核态进程上下文
+    
+    inode_t* cwd;            // 当前工作目录
 } proc_t;
 
 void     proc_init();                                  // 进程模块初始化

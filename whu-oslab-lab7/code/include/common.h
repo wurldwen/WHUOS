@@ -23,4 +23,6 @@ typedef enum {false = 0, true = 1} bool;
 #define NCPU 2
 #define NPROC 64  // maximum number of processes
 
+#define BLOCK_SIZE 1024
+
 #endif

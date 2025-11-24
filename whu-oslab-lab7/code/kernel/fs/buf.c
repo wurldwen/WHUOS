@@ -7,6 +7,9 @@
 #define N_BLOCK_BUF 64
 #define BLOCK_NUM_UNUSED 0xFFFFFFFF
 
+// offsetof 宏定义
+#define offsetof(TYPE, MEMBER) ((uint64)&((TYPE *)0)->MEMBER)
+
 // 将buf包装成双向循环链表的node
 typedef struct buf_node {
     buf_t buf;
@@ -42,10 +45,31 @@ static void insert_head(buf_node_t* buf_node, bool head_next)
     }
 }
 
-// 初始化
+// 初始化缓冲区缓存
 void buf_init()
 {
-
+    spinlock_init(&lk_buf_cache, "buf_cache");
+    
+    // 初始化head节点（双向循环链表）
+    head_buf.next = &head_buf;
+    head_buf.prev = &head_buf;
+    
+    // 初始化所有缓冲区节点
+    for(int i = 0; i < N_BLOCK_BUF; i++) {
+        buf_node_t* node = &buf_cache[i];
+        buf_t* buf = &node->buf;
+        
+        // 初始化自旋锁
+        spinlock_init(&buf->slk, "buffer");
+        
+        // 初始化buf字段
+        buf->block_num = BLOCK_NUM_UNUSED;
+        buf->buf_ref = 0;
+        buf->disk = false;
+        
+        // 将node插入链表尾部（head->prev位置，表示可分配）
+        insert_head(node, false);
+    }
 }
 
 /*
@@ -56,19 +80,86 @@ void buf_init()
 */
 buf_t* buf_read(uint32 block_num)
 {
-
+    buf_node_t* node;
+    buf_t* buf;
+    
+    spinlock_acquire(&lk_buf_cache);
+    
+    // 第一步：查找是否已经在缓存中
+    for(node = head_buf.next; node != &head_buf; node = node->next) {
+        buf = &node->buf;
+        if(buf->block_num == block_num) {
+            // 找到了，增加引用计数
+            buf->buf_ref++;
+            spinlock_release(&lk_buf_cache);
+            
+            // 获取自旋锁
+            spinlock_acquire(&buf->slk);
+            return buf;
+        }
+    }
+    
+    // 第二步：未找到，需要从空闲缓冲区分配
+    // 从链表尾部（head->prev）开始查找，这些是最少使用的
+    for(node = head_buf.prev; node != &head_buf; node = node->prev) {
+        buf = &node->buf;
+        if(buf->buf_ref == 0) {
+            // 找到一个空闲缓冲区
+            buf->block_num = block_num;
+            buf->buf_ref = 1;
+            buf->disk = false;  // 标记为未同步
+            spinlock_release(&lk_buf_cache);
+            
+            // 获取自旋锁
+            spinlock_acquire(&buf->slk);
+            
+            // 从磁盘读取数据
+            virtio_disk_rw(buf, false);  // false表示读操作
+            
+            return buf;
+        }
+    }
+    
+    // 没有可用的缓冲区
+    spinlock_release(&lk_buf_cache);
+    panic("buf_read: no buffers");
+    return 0;
 }
 
 // 写函数 (强制磁盘和内存保持一致)
 void buf_write(buf_t* buf)
 {
-
+    // 调用者应该持有自旋锁
+    if(!spinlock_holding(&buf->slk)) {
+        panic("buf_write: not holding lock");
+    }
+    
+    // 写入磁盘
+    virtio_disk_rw(buf, true);  // true表示写操作
 }
 
 // buf 释放
 void buf_release(buf_t* buf)
 {
-
+    // 调用者应该持有自旋锁
+    if(!spinlock_holding(&buf->slk)) {
+        panic("buf_release: not holding lock");
+    }
+    
+    // 释放自旋锁
+    spinlock_release(&buf->slk);
+    
+    spinlock_acquire(&lk_buf_cache);
+    buf->buf_ref--;
+    
+    if(buf->buf_ref == 0) {
+        // 没有人引用了，移动到链表头部（最近使用）
+        // 通过buf指针获取包含它的node
+        buf_node_t* node = (buf_node_t*)((char*)buf - offsetof(buf_node_t, buf));
+        insert_head(node, true);
+    }
+    
+    spinlock_release(&lk_buf_cache);
 }
 
 // 输出buf_cache的情况

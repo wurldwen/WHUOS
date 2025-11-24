@@ -50,4 +50,7 @@
 // For simplicity in Lab 4, we only support process 0, so we can use a fixed address
 #define KSTACK(p) (TRAPFRAME - ((p)+1)* 2*PGSIZE)
 
+#define VIRTIO_BASE 0x10001000ul
+#define VIRTIO_IRQ 1
+
 #endif

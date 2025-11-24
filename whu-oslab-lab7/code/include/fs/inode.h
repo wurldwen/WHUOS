@@ -42,7 +42,7 @@ typedef struct inode {
     uint16 inode_num;           // inode序号
     uint32 ref;                 // 引用数 (由lk_icache保护)
     bool valid;                 // 上述磁盘里inode字段的有效性 (由slk保护)
-    sleeplock_t slk;            // 睡眠锁
+    spinlock_t slk;             // 自旋锁
 
 } inode_t;
 
