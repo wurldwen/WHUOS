@@ -1305,7 +1305,7 @@ super_block_t sb;
 static uint8 str[BLOCK_SIZE * 2];
 static uint8 tmp[BLOCK_SIZE * 2];
 
-// 比较两个大小为 2*BLOCK_SIZE 的空间是否完全一样（暂未使用）
+// 比较两个大小为 2*BLOCK_SIZE 的空间是否完全一样
 
 static bool blockcmp(uint8* a, uint8* b)
 {
@@ -1392,3 +1392,114 @@ void fs_init()
 测试结果
 
 ![1765184402174](image/doc/1765184402174.png)
+
+### 路径测试
+
+测试代码
+
+```c++
+#include "fs/fs.h"
+#include "fs/buf.h"
+#include "fs/bitmap.h"
+#include "fs/inode.h"
+#include "fs/dir.h"
+#include "lib/str.h"
+#include "lib/print.h"
+
+// 超级块在内存的副本
+super_block_t sb;
+
+#define FS_MAGIC 0x12345678
+#define SB_BLOCK_NUM 0
+
+// 输出super_block的信息
+static void sb_print()
+{
+    printf("\nsuper block information:\n");
+    printf("magic = %x\n", sb.magic);
+    printf("block size = %d\n", sb.block_size);
+    printf("inode blocks = %d\n", sb.inode_blocks);
+    printf("data blocks = %d\n", sb.data_blocks);
+    printf("total blocks = %d\n", sb.total_blocks);
+    printf("inode bitmap start = %d\n", sb.inode_bitmap_start);
+    printf("inode start = %d\n", sb.inode_start);
+    printf("data bitmap start = %d\n", sb.data_bitmap_start);
+    printf("data start = %d\n", sb.data_start);
+}
+
+// 文件系统初始化
+void fs_init()
+{
+    buf_init();
+
+    buf_t* buf; 
+    buf = buf_read(SB_BLOCK_NUM);
+    memmove(&sb, buf->data, sizeof(sb));
+    assert(sb.magic == FS_MAGIC, "fs_init: magic");
+    assert(sb.block_size == BLOCK_SIZE, "fs_init: block size");
+    buf_release(buf);
+    sb_print();
+
+    // inode初始化
+    inode_init();
+  
+    printf("\nFile system initialized\n");
+  
+    // 创建inode
+    inode_t* ip = inode_alloc(INODE_ROOT);
+    inode_t* ip_1 = inode_create(FT_DIR, 0, 0);
+    inode_t* ip_2 = inode_create(FT_DIR, 0, 0);
+    inode_t* ip_3 = inode_create(FT_FILE, 0, 0);
+
+    // 上锁
+    inode_lock(ip);
+    inode_lock(ip_1);
+    inode_lock(ip_2);
+    inode_lock(ip_3);
+
+    // 创建目录
+    dir_add_entry(ip, ip_1->inode_num, "user");
+    dir_add_entry(ip_1, ip_2->inode_num, "work");
+    dir_add_entry(ip_2, ip_3->inode_num, "hello.txt");
+  
+    // 填写文件
+    inode_write_data(ip_3, 0, 11, "hello world", false);
+
+    // 解锁
+    inode_unlock(ip_3);
+    inode_unlock(ip_2);
+    inode_unlock(ip_1);
+    inode_unlock(ip);
+
+    // 路径查找
+    char* path = "/user/work/hello.txt";
+    char name[DIR_NAME_LEN];
+    inode_t* tmp_1 = path_to_pinode(path, name);
+    inode_t* tmp_2 = path_to_inode(path);
+
+    assert(tmp_1 != NULL, "tmp1 = NULL");
+    assert(tmp_2 != NULL, "tmp2 = NULL");
+    printf("\nname = %s\n", name);
+
+    // 输出 tmp_1 的信息
+    inode_lock(tmp_1);
+    inode_print(tmp_1);
+    inode_unlock_free(tmp_1);
+
+    // 输出 tmp_2 的信息
+    inode_lock(tmp_2);
+    inode_print(tmp_2);
+    char str[12];
+    str[11] = 0;
+    inode_read_data(tmp_2, 0, tmp_2->size, str, false);
+    printf("read: %s\n", str);
+    inode_unlock_free(tmp_2);
+
+    printf("over");
+    while (1); 
+}
+```
+
+测试结果
+
+![1765184670599](image/doc/1765184670599.png)
