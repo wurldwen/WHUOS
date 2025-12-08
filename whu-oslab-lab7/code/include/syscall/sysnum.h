@@ -9,7 +9,8 @@
 #define SYS_wait         5
 #define SYS_exit         6
 #define SYS_sleep        7
+#define SYS_exec         8
 
-#define SYS_MAX          7
+#define SYS_MAX          8
 
 #endif

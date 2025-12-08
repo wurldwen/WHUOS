@@ -16,6 +16,7 @@ static uint64 (*syscalls[])(void) = {
     [SYS_wait]          sys_wait,
     [SYS_exit]          sys_exit,
     [SYS_sleep]         sys_sleep,
+    [SYS_exec]          sys_exec,
 };
 
 // 系统调用

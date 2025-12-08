@@ -92,6 +92,11 @@ enum proc_state {
 
 // 前向声明
 typedef struct inode inode_t;
+typedef struct file file_t;
+
+// 常量定义
+#define FILE_PER_PROC 16  // 每个进程的最大文件描述符数
+#define ELF_MAXARGS   32  // exec 的最大参数数量
 
 // 进程定义
 typedef struct proc {
@@ -117,6 +122,7 @@ typedef struct proc {
     context_t ctx;           // 内核态进程上下文
     
     inode_t* cwd;            // 当前工作目录
+    file_t* filelist[FILE_PER_PROC];  // 文件描述符表
 } proc_t;
 
 void     proc_init();                                  // 进程模块初始化
