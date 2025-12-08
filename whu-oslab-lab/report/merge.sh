@@ -1,7 +1,7 @@
 #!/bin/bash
 output="content.md"
 > "$output"  # 清空或创建文件
-for i in {1..10}; do
+for i in {1..7}; do
     if [ -f "${i}.md" ]; then
         cat "${i}.md" >> "$output"
         echo "" >> "$output"  # 添加空行分隔章节
