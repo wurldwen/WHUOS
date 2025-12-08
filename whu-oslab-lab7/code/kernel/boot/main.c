@@ -6,6 +6,9 @@
 #include "proc/cpu.h"
 #include "proc/proc.h"
 #include "trap/trap.h"
+#include "dev/vio.h"   // 添加VirtIO设备头文件
+#include "dev/plic.h"  // 添加PLIC头文件
+#include "fs/fs.h"     // 添加文件系统头文件
 
 volatile static int started = 0;
 
@@ -14,43 +17,32 @@ int main()
     int cpuid = r_tp();
 
     if(cpuid == 0) {
-        // CPU 0: 主核心初始化
-        print_init();
-
-//        printf("\n=== WHU OS Lab 4: First User Process ===\n");
-//        printf("Initializing system...\n\n");
-
+          print_init();
         // 初始化物理内存管理器
         pmem_init();
-//        printf("Physical memory initialized\n");
-        
         // 初始化mmap区域管理器
         mmap_init();
-//        printf("MMAP region allocator initialized\n");
-        
-        // 初始化内核虚拟内存（页表）
+       // 初始化内核虚拟内存（页表）
         kvm_init();
-//        printf("Kernel virtual memory initialized\n");
-        
-//        printf("About to initialize hart VM...\n");
-        // 初始化当前 hart 的虚拟内存
+       // 初始化当前 hart 的虚拟内存
         kvm_inithart();
-//        printf("Kernel VM enabled for hart %d\n", cpuid);
-        
-        // 初始化进程表
-        proc_init();
-        
+       // 初始化进程表
+        proc_init();     
         // 初始化 CPU 结构
         cpu_init();
-//        printf("CPU structures initialized\n");
-        
         // 初始化内核trap系统
         trap_kernel_init();
         trap_kernel_inithart();
-//        printf("Trap system initialized\n");
         
-//        printf("\nSystem initialization complete.\n");
-//        printf("Creating first user process (proczero)...\n\n");
+        // 初始化PLIC (Platform-Level Interrupt Controller)
+        plic_init();
+        plic_inithart();  // Enable interrupts for this hart
+        
+        // 初始化VirtIO磁盘设备（必须在文件系统之前）
+        virtio_disk_init();
+        
+        // 注意：文件系统初始化(fs_init)会在第一个进程上下文中执行
+        // 因为它需要调用sleep，必须在进程环境中运行
         
         __sync_synchronize();
         started = 1;  // 允许其他CPU继续启动

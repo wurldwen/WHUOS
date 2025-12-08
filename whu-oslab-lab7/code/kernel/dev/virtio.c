@@ -14,6 +14,7 @@
 #include "lib/str.h"
 #include "mem/vmem.h"
 #include "proc/proc.h"
+#include "proc/cpu.h"
 #include "riscv.h"
 #include "memlayout.h"
 
@@ -215,12 +216,14 @@ void virtio_disk_rw(buf_t *b, bool write)
     uint64 addr = PG_ROUND_DOWN((uint64)&buf0);
     uint64 off  = ((uint64)&buf0) % PGSIZE;
 
-    pte_t* pte = vm_getpte(NULL, addr, false);
+    pte_t* pte = vm_getpte(kvm_get_kernel_pgtbl(), addr, false);
     disk.desc[idx[0]].addr = (uint64)PTE_TO_PA(*pte) + off;
     disk.desc[idx[0]].len = sizeof(buf0);
     disk.desc[idx[0]].flags = VRING_DESC_F_NEXT;
     disk.desc[idx[0]].next = idx[1];
 
+    // 对于内核直接映射的区域，虚拟地址即物理地址
+    // buf_cache是全局数组，在内核数据段，是直接映射的
     disk.desc[idx[1]].addr = (uint64)b->data;
     disk.desc[idx[1]].len = BLOCK_SIZE;
     if (write)
@@ -236,7 +239,7 @@ void virtio_disk_rw(buf_t *b, bool write)
     disk.desc[idx[2]].flags = VRING_DESC_F_WRITE; // device writes the status
     disk.desc[idx[2]].next = 0;
 
-    // record   for virtio_disk_intr().
+    // record struct buf for virtio_disk_intr().
     b->disk = true;
     disk.info[idx[0]].b = b;
 
@@ -266,19 +269,26 @@ void virtio_disk_intr()
 {
     spinlock_acquire(&disk.vdisk_lock);
 
-    while ((disk.used_idx % NUM) != (disk.used->id % NUM))
+    // Acknowledge the interrupt first
+    *R(VIRTIO_MMIO_INTERRUPT_ACK) = *R(VIRTIO_MMIO_INTERRUPT_STATUS) & 0x3;
+
+    __sync_synchronize();
+    
+    // Process all completed requests
+    while (disk.used_idx != disk.used->idx)
     {
-        int id = disk.used->elems[disk.used_idx].id;
+        __sync_synchronize();
+        int id = disk.used->elems[disk.used_idx % NUM].id;
 
         if (disk.info[id].status != 0)
             panic("virtio_disk_intr status");
+        
+        buf_t *b = disk.info[id].b;
+        b->disk = false; // disk is done with buf
+        proc_wakeup(b);
 
-        disk.info[id].b->disk = false; // disk is done with buf
-        proc_wakeup(disk.info[id].b);
-
-        disk.used_idx = (disk.used_idx + 1) % NUM;
+        disk.used_idx += 1;
     }
-    *R(VIRTIO_MMIO_INTERRUPT_ACK) = *R(VIRTIO_MMIO_INTERRUPT_STATUS) & 0x3;
 
     spinlock_release(&disk.vdisk_lock);
 }

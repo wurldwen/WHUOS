@@ -10,7 +10,7 @@ char *str1, *str2;
 
 int main()
 {
-    syscall(SYS_print, "\nuser begin\n");
+    //syscall(SYS_print, "\nuser begin\n");
 
     // // //测试MMAP区域
     // str1 = (char*)syscall(SYS_mmap, MMAP_BEGIN, PGSIZE);

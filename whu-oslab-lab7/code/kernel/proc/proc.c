@@ -228,6 +228,11 @@ void proc_make_first()
     
     proczero = p;
     
+    // 第一个进程需要特殊处理：让它返回到 proc_forkret
+    // proc_forkret 会释放调度器持有的锁，然后初始化文件系统
+    extern void proc_forkret();
+    p->ctx.ra = (uint64)proc_forkret;
+    
     // 分配一个物理页并映射initcode
     uint64 pa = (uint64)pmem_alloc(false);
     if(pa == 0)
@@ -467,6 +472,28 @@ void proc_exit(int exit_state)
     panic("proc_exit: zombie exit");
 }
 
+// 第一个进程第一次被调度后会执行这个函数
+// 类似 xv6 的 forkret
+void proc_forkret()
+{
+    static int first = 1;
+    
+    // 调度器仍然持有 p->lock，需要先释放它
+    spinlock_release(&myproc()->lk);
+    
+    if (first) {
+        // 文件系统初始化必须在进程上下文中运行（因为会调用sleep）
+        // 所以不能在main()中运行
+        first = 0;
+        extern void fs_init(void);
+        fs_init();
+    }
+    
+    // 返回用户态
+    extern void trap_user_return();
+    trap_user_return();
+}
+
 // 进程切换到调度器
 // ps: 调用者保证持有当前进程的锁
 void proc_sched()
@@ -502,6 +529,10 @@ void proc_scheduler()
     printf("[SCHEDULER] CPU%d starting scheduler\n", mycpuid());
     
     for(;;) {
+        // 避免死锁：确保设备可以中断
+        // 启用中断以便 VirtIO 等设备的中断处理程序可以唤醒睡眠的进程
+        intr_on();
+        
         // 遍历进程表寻找可运行的进程
         for(p = procs; p < &procs[NPROC]; p++) {
             spinlock_acquire(&p->lk);
@@ -576,7 +607,10 @@ void proc_wakeup(void* sleep_space)
 {
     proc_t* p;
     
-    printf("[WAKEUP] waking up processes on %p\n", sleep_space);
+    // 获取返回地址以便追踪调用者
+    uint64 ra;
+    asm volatile("mv %0, ra" : "=r" (ra));
+    printf("[WAKEUP] waking up processes on %p, caller=%p\n", sleep_space, ra);
     
     for(p = procs; p < &procs[NPROC]; p++) {
         if(p != myproc()) {

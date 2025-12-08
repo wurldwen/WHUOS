@@ -72,8 +72,15 @@ void external_interrupt_handler()
     int irq = plic_claim();
     
     if (irq == UART_IRQ) {
-        // UART 串口中断：读取并回显字符
+        // UART 串口中断：读取并回显字符 (suppress logging to avoid spam)
         uart_intr();
+    } else if (irq == VIRTIO_IRQ) {
+        // VirtIO 磁盘中断
+        printf("[EXT_INTR] Processing VirtIO interrupt (irq=%d)\n", irq);
+        extern void virtio_disk_intr();
+        virtio_disk_intr();
+    } else if (irq != 0) {
+        printf("[EXT_INTR] Unknown IRQ: %d\n", irq);
     }
 
     // 通知PLIC该中断已处理完成

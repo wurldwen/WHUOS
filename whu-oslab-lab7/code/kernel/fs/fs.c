@@ -12,6 +12,22 @@ super_block_t sb;
 #define FS_MAGIC 0x12345678
 #define SB_BLOCK_NUM 0
 
+// 测试用的数组（暂未使用）
+// static uint8 str[BLOCK_SIZE * 2];
+// static uint8 tmp[BLOCK_SIZE * 2];
+
+// 比较两个大小为 2*BLOCK_SIZE 的空间是否完全一样（暂未使用）
+
+static bool blockcmp(uint8* a, uint8* b)
+{
+    for(int i = 0; i < BLOCK_SIZE * 2; i++) {
+        if(a[i] != b[i])
+            return false;
+    }
+    return true;
+}
+
+
 // 输出super_block的信息
 static void sb_print()
 {
@@ -40,5 +56,44 @@ void fs_init()
     buf_release(buf);
     sb_print();
 
+    // inode初始化
     inode_init();
+    
+    printf("\nFile system initialized successfully!\n");
+    uint32 ret = 0;
+
+    for(int i = 0; i < BLOCK_SIZE * 2; i++)
+        str[i] = i;
+
+    // 创建新的inode
+    inode_t* nip = inode_create(FT_FILE, 0, 0);
+    inode_lock(nip);
+    
+    // 第一次查看
+    inode_print(nip);
+
+    // 第一次写入
+    ret = inode_write_data(nip, 0, BLOCK_SIZE / 2, str, false);
+    assert(ret == BLOCK_SIZE / 2, "inode_write_data: fail");
+
+    // 第二次写入
+    ret = inode_write_data(nip, BLOCK_SIZE / 2, BLOCK_SIZE + BLOCK_SIZE / 2, str + BLOCK_SIZE / 2, false);
+    assert(ret == BLOCK_SIZE +  BLOCK_SIZE / 2, "inode_write_data: fail");
+
+    // 一次读取
+    ret = inode_read_data(nip, 0, BLOCK_SIZE * 2, tmp, false);
+    assert(ret == BLOCK_SIZE * 2, "inode_read_data: fail");
+
+    // 第二次查看
+    inode_print(nip);
+    
+    inode_unlock_free(nip);
+
+    // 测试
+    if(blockcmp(tmp, str) == true)
+        printf("success");
+    else
+        printf("fail");
+
+    while (1); 
 }

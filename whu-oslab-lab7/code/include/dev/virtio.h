@@ -73,6 +73,6 @@ struct VRingUsedElem
 struct UsedArea
 {
     uint16 flags;
-    uint16 id;
+    uint16 idx;  // device increments when it adds a ring[] entry
     struct VRingUsedElem elems[NUM];
 };
