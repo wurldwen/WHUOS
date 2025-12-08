@@ -269,6 +269,9 @@ static inode_t* search_inode(char* path, char* name, bool find_parent)
     
     // 逐级解析路径
     while((path = skip_element(path, name)) != 0) {
+        //printf("[PATH DEBUG] After skip_element: name='%s', remaining path='%s', *path=%d, current ip->num=%d\n", 
+        //       name, path, *path, ip->inode_num);
+        
         inode_lock(ip);
         
         // 检查是否为目录
@@ -279,6 +282,7 @@ static inode_t* search_inode(char* path, char* name, bool find_parent)
         
         // 如果需要父节点且这是最后一级，返回当前节点
         if(find_parent && *path == '\0') {
+            //printf("[PATH DEBUG] Returning parent: ip->num=%d\n", ip->inode_num);
             inode_unlock(ip);
             return ip;
         }

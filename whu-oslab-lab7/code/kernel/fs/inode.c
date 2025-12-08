@@ -92,7 +92,7 @@ inode_t* inode_alloc(uint16 inode_num)
     ip->inode_num = inode_num;
     ip->ref = 1;
     ip->valid = false;  // 需要后续从磁盘读取
-    
+    //printf("inode_alloc: allocated inode %d\n", inode_num);
     spinlock_release(&lk_icache);
     return ip;
 }
