@@ -1286,7 +1286,7 @@ ustack_base →       │  栈         │ ← 向下增长
 
 测试代码
 
-```
+```c++
 #include "fs/fs.h"
 #include "fs/buf.h"
 #include "fs/bitmap.h"
@@ -1348,11 +1348,12 @@ void fs_init()
     // inode初始化
     inode_init();
   
-    printf("\nFile system initialized successfully!\n");
+    printf("\nFile system initialized\n");
+  
     uint32 ret = 0;
 
     for(int i = 0; i < BLOCK_SIZE * 2; i++)
-        str[i] = i;
+            str[i] = i;
 
     // 创建新的inode
     inode_t* nip = inode_create(FT_FILE, 0, 0);
@@ -1367,7 +1368,7 @@ void fs_init()
 
     // 第二次写入
     ret = inode_write_data(nip, BLOCK_SIZE / 2, BLOCK_SIZE + BLOCK_SIZE / 2, str + BLOCK_SIZE / 2, false);
-    assert(ret == BLOCK_SIZE + BLOCK_SIZE / 2, "inode_write_data: fail");
+    assert(ret == BLOCK_SIZE +    BLOCK_SIZE / 2, "inode_write_data: fail");
 
     // 一次读取
     ret = inode_read_data(nip, 0, BLOCK_SIZE * 2, tmp, false);
@@ -1380,12 +1381,14 @@ void fs_init()
 
     // 测试
     if(blockcmp(tmp, str) == true)
-        printf("success");
+            printf("success");
     else
-        printf("fail");
+            printf("fail");
 
     while (1); 
 }
 ```
 
 测试结果
+
+![1765184402174](image/doc/1765184402174.png)

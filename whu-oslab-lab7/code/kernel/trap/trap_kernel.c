@@ -76,7 +76,7 @@ void external_interrupt_handler()
         uart_intr();
     } else if (irq == VIRTIO_IRQ) {
         // VirtIO 磁盘中断
-        printf("[EXT_INTR] Processing VirtIO interrupt (irq=%d)\n", irq);
+        // printf("[EXT_INTR] Processing VirtIO interrupt (irq=%d)\n", irq);
         extern void virtio_disk_intr();
         virtio_disk_intr();
     } else if (irq != 0) {

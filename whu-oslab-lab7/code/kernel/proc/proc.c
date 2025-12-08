@@ -510,12 +510,12 @@ void proc_sched()
     // 检查状态不是RUNNING
     assert(p->state != RUNNING, "proc_sched: running");
     
-    printf("[SCHED] pid=%d calling swtch, kstack=%p, sp=%p\n", p->pid, p->kstack, p->ctx.sp);
+    // printf("[SCHED] pid=%d calling swtch, kstack=%p, sp=%p\n", p->pid, p->kstack, p->ctx.sp);
     
     // 切换到调度器上下文
     swtch(&p->ctx, &mycpu()->ctx);
     
-    printf("[SCHED] pid=%d returned from swtch\n", p->pid);
+    // printf("[SCHED] pid=%d returned from swtch\n", p->pid);
 }
 
 // 调度器
@@ -570,7 +570,7 @@ void proc_sleep(void* sleep_space, spinlock_t* lk)
 {
     proc_t* p = myproc();
     
-    printf("[SLEEP] pid=%d sleeping on %p\n", p->pid, sleep_space);
+    // printf("[SLEEP] pid=%d sleeping on %p\n", p->pid, sleep_space);
     
     // 必须获取p->lock才能修改p->state
     // 一旦我们持有p->lock，我们可以保证不会错过任何唤醒
@@ -584,21 +584,21 @@ void proc_sleep(void* sleep_space, spinlock_t* lk)
     
     proc_sched();
     
-    int test_var = 42;
-    printf("[SLEEP] pid=%d test_var=%d\n", p ? p->pid : -1, test_var);
+    // int test_var = 42;
+    // printf("[SLEEP] pid=%d test_var=%d\n", p ? p->pid : -1, test_var);
     
     // 醒来后清理
     p->sleep_space = 0;
     
-    printf("[SLEEP] pid=%d releasing p->lk\n", p->pid);
+    // printf("[SLEEP] pid=%d releasing p->lk\n", p->pid);
     
     // 重新获取原来的锁
     spinlock_release(&p->lk);
     
-    printf("[SLEEP] pid=%d acquiring lk\n", p->pid);
+    // printf("[SLEEP] pid=%d acquiring lk\n", p->pid);
     spinlock_acquire(lk);
     
-    printf("[SLEEP] pid=%d done\n", p->pid);
+    // printf("[SLEEP] pid=%d done\n", p->pid);
 }
 
 // 唤醒所有在sleep_space沉睡的进程
@@ -608,15 +608,15 @@ void proc_wakeup(void* sleep_space)
     proc_t* p;
     
     // 获取返回地址以便追踪调用者
-    uint64 ra;
-    asm volatile("mv %0, ra" : "=r" (ra));
-    printf("[WAKEUP] waking up processes on %p, caller=%p\n", sleep_space, ra);
+    // uint64 ra;
+    // asm volatile("mv %0, ra" : "=r" (ra));
+    // printf("[WAKEUP] waking up processes on %p, caller=%p\n", sleep_space, ra);
     
     for(p = procs; p < &procs[NPROC]; p++) {
         if(p != myproc()) {
             spinlock_acquire(&p->lk);
             if(p->state == SLEEPING && p->sleep_space == sleep_space) {
-                printf("[WAKEUP] waking up pid=%d\n", p->pid);
+                // printf("[WAKEUP] waking up pid=%d\n", p->pid);
                 p->state = RUNNABLE;
             }
             spinlock_release(&p->lk);
