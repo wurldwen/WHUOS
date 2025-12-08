@@ -1,0 +1,18 @@
+{
+    "files.associations": {
+        "riscv.h": "c",
+        "print.h": "c",
+        "lock.h": "c",
+        "uart.h": "c",
+        "types.h": "c",
+        "semaphore": "c",
+        "stop_token": "c",
+        "defs.h": "c",
+        "fs.h": "c",
+        "pmem.h": "c",
+        "proc.h": "c",
+        "memlayout.h": "c",
+        "random": "c",
+        "cpu.h": "c"
+    }
+}
