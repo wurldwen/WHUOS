@@ -747,7 +747,7 @@ static int loadseg(pgtbl_t pgtbl, uint64 va, inode_t* ip, uint32 offset, uint32 
         // 获取虚拟地址对应的物理地址
         pte_t* pte = vm_getpte(pgtbl, va + i, false);
         pa = PTE_TO_PA(*pte);
-    
+  
         // 从inode读取数据到物理地址
         if(inode_read_data(ip, offset + i, n, (void*)pa, false) != n)
             return -1;
@@ -1301,11 +1301,12 @@ super_block_t sb;
 #define FS_MAGIC 0x12345678
 #define SB_BLOCK_NUM 0
 
-// 测试用的数组
+// 测试用的数组（暂未使用）
 static uint8 str[BLOCK_SIZE * 2];
 static uint8 tmp[BLOCK_SIZE * 2];
 
-// 比较两个大小为 2*BLOCK_SIZE 的空间是否完全一样
+// 比较两个大小为 2*BLOCK_SIZE 的空间是否完全一样（暂未使用）
+
 static bool blockcmp(uint8* a, uint8* b)
 {
     for(int i = 0; i < BLOCK_SIZE * 2; i++) {
@@ -1314,6 +1315,7 @@ static bool blockcmp(uint8* a, uint8* b)
     }
     return true;
 }
+
 
 // 输出super_block的信息
 static void sb_print()
@@ -1346,8 +1348,7 @@ void fs_init()
     // inode初始化
     inode_init();
   
-    printf("\n========== Inode Read/Write Test Start ==========\n");
-  
+    printf("\nFile system initialized successfully!\n");
     uint32 ret = 0;
 
     for(int i = 0; i < BLOCK_SIZE * 2; i++)
@@ -1358,45 +1359,32 @@ void fs_init()
     inode_lock(nip);
   
     // 第一次查看
-    printf("\n[Before Write] ");
     inode_print(nip);
 
     // 第一次写入
-    printf("\n[First Write] Writing %d bytes at offset 0\n", BLOCK_SIZE / 2);
     ret = inode_write_data(nip, 0, BLOCK_SIZE / 2, str, false);
     assert(ret == BLOCK_SIZE / 2, "inode_write_data: fail");
-    printf("[First Write] Success: wrote %d bytes\n", ret);
 
     // 第二次写入
-    printf("\n[Second Write] Writing %d bytes at offset %d\n", 
-           BLOCK_SIZE + BLOCK_SIZE / 2, BLOCK_SIZE / 2);
-    ret = inode_write_data(nip, BLOCK_SIZE / 2, BLOCK_SIZE + BLOCK_SIZE / 2, 
-                          str + BLOCK_SIZE / 2, false);
+    ret = inode_write_data(nip, BLOCK_SIZE / 2, BLOCK_SIZE + BLOCK_SIZE / 2, str + BLOCK_SIZE / 2, false);
     assert(ret == BLOCK_SIZE + BLOCK_SIZE / 2, "inode_write_data: fail");
-    printf("[Second Write] Success: wrote %d bytes\n", ret);
 
     // 一次读取
-    printf("\n[Read] Reading %d bytes from offset 0\n", BLOCK_SIZE * 2);
     ret = inode_read_data(nip, 0, BLOCK_SIZE * 2, tmp, false);
     assert(ret == BLOCK_SIZE * 2, "inode_read_data: fail");
-    printf("[Read] Success: read %d bytes\n", ret);
 
     // 第二次查看
-    printf("\n[After Write] ");
     inode_print(nip);
   
     inode_unlock_free(nip);
 
     // 测试
-    printf("\n[Test Result] Data comparison: ");
     if(blockcmp(tmp, str) == true)
-        printf("SUCCESS - Data integrity verified!\n");
+        printf("success");
     else
-        printf("FAIL - Data mismatch detected!\n");
-  
-    printf("========== Inode Read/Write Test End ==========\n\n");
+        printf("fail");
 
-    while (1);
+    while (1); 
 }
 ```
 

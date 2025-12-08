@@ -526,7 +526,7 @@ void proc_scheduler()
     
     c->proc = 0;
     
-    printf("[SCHEDULER] CPU%d starting scheduler\n", mycpuid());
+    // printf("[SCHEDULER] CPU%d starting scheduler\n", mycpuid());
     
     for(;;) {
         // 避免死锁：确保设备可以中断
@@ -538,21 +538,21 @@ void proc_scheduler()
             spinlock_acquire(&p->lk);
             
             if(p->state == RUNNABLE) {
-                printf("[SCHEDULER] CPU%d found RUNNABLE pid=%d\n", mycpuid(), p->pid);
+                // printf("[SCHEDULER] CPU%d found RUNNABLE pid=%d\n", mycpuid(), p->pid);
                 
                 // 找到一个可运行的进程，切换到它
                 p->state = RUNNING;
                 c->proc = p;
                 
-                printf("[SCHEDULER] CPU%d switching to pid=%d, ra=%p, sp=%p\n", 
-                       mycpuid(), p->pid, p->ctx.ra, p->ctx.sp);
+                // printf("[SCHEDULER] CPU%d switching to pid=%d, ra=%p, sp=%p\n", 
+                //        mycpuid(), p->pid, p->ctx.ra, p->ctx.sp);
                 
                 // 切换到进程上下文
                 // 注意：进程会在某个时刻返回到这里，那时它仍然持有p->lk
                 // 进程需要自己释放这个锁
                 swtch(&c->ctx, &p->ctx);
                 
-                printf("[SCHEDULER] CPU%d returned from pid=%d\n", mycpuid(), p->pid);
+                // printf("[SCHEDULER] CPU%d returned from pid=%d\n", mycpuid(), p->pid);
                 
                 // 进程返回后，清除CPU的进程指针
                 c->proc = 0;
