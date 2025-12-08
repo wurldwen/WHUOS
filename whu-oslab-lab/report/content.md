@@ -3434,7 +3434,7 @@ typedef struct mmap_region mmap_region_t;
 
 操作系统是一个复杂而精巧的系统，每一个细节都需要仔细考虑。本次实验让我对"细节决定成败"这句话有了更深的体会。
 
-# 实验六：进程管理 实验报告
+# 实验六：进程管理
 
 ## 一、实验目标
 
@@ -3931,7 +3931,7 @@ int proc_wait(uint64 addr) {
             if(pp->parent == p) {
                 spinlock_acquire(&pp->lk);
                 havekids = 1;
-        
+      
                 if(pp->state == ZOMBIE) {
                     // 找到 zombie 子进程，回收资源
                     proc_free(pp);
@@ -4010,7 +4010,7 @@ void proc_exit(int exit_state) {
 3. **锁的使用要谨慎**：sleep 和 wakeup 需要额外的锁来防止丢失唤醒
 4. **栈指针要正确**：kstack 为 0 会导致栈指针错误，引发难以调试的问题
 
-# 实验七：文件系统实验报告
+# 实验七：文件系统
 
 ## 实验目标
 
