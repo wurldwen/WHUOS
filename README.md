@@ -1,8 +1,8 @@
-此分支为第四次实验
+此分支为总实验
 
-代码在 whu-oslab-lab7/code 中
+代码在 whu-oslab-lab/code 中
 
-报告在 whu-oslab-lab7/report 中
+报告在 whu-oslab-lab/report 中
 
 ## 代码组织结构
 
