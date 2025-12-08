@@ -2,7 +2,7 @@
 
 代码在 whu-oslab-lab/code 中
 
-报告在 whu-oslab-lab/report 中
+总报告为 whu-oslab-lab/report/doc.pdf 
 
 ## 代码组织结构
 
